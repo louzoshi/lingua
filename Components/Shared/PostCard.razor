@@ -1,6 +1,6 @@
 <article class="post">
     <div class="post-head">
-        <AvatarView Image="Post.AuthorImage" Name="Post.AuthorName" />
+        <AvatarView Image="@Post.AuthorImage" Name="@Post.AuthorName" />
         <div>
             <a href="@($"/perfil/{Post.AuthorSlug}")">@Post.AuthorName</a>
             <div class="small muted">
@@ -33,6 +33,24 @@
         <a href="@($"/posts/{Post.Id}")">@Post.Title</a>
     </h3>
     <p class="muted">@Post.Summary</p>
+
+    @if (Post.CoverUrl != null)
+    {
+        <a class="post-cover" href="@($"/posts/{Post.Id}")">
+            @if (Post.CoverKind == MediaKind.Video)
+            {
+                <video src="@Post.CoverUrl" muted preload="metadata"></video>
+            }
+            else
+            {
+                <img src="@Post.CoverUrl" alt="" loading="lazy" />
+            }
+            @if (Post.MediaCount > 1)
+            {
+                <span class="badge count">+@(Post.MediaCount - 1)</span>
+            }
+        </a>
+    }
 
     <div class="post-actions">
         <button class="btn ghost small" type="button" @onclick="OnReact">

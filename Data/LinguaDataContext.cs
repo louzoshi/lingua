@@ -26,6 +26,7 @@ public abstract class LinguaDataContext : DbContext
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<Comment> Comments => Set<Comment>();
     public DbSet<Reaction> Reactions => Set<Reaction>();
+    public DbSet<PostMedia> PostMedia => Set<PostMedia>();
 
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ConversationParticipant> ConversationParticipants => Set<ConversationParticipant>();
@@ -39,6 +40,13 @@ public abstract class LinguaDataContext : DbContext
     public DbSet<AssignmentSubmission> AssignmentSubmissions => Set<AssignmentSubmission>();
 
     public DbSet<InteractionEvent> InteractionEvents => Set<InteractionEvent>();
+
+    public DbSet<Package> Packages => Set<Package>();
+    public DbSet<StudentPlan> StudentPlans => Set<StudentPlan>();
+    public DbSet<Payment> Payments => Set<Payment>();
+
+    /// <summary>Fila de saída lida pelo worker <c>Lingua.Notifications</c>.</summary>
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
         => modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());

@@ -24,7 +24,7 @@ public class AccountController : ApiController
         [FromBody] RegisterViewModel model,
         [FromQuery] string? role,
         [FromServices] LinguaDataContext context,
-        [FromServices] EmailService emailService)
+        [FromServices] NotificationService notifications)
     {
         if (!ModelState.IsValid)
             return BadRequest(ResultViewModel<string>.Fail(ModelState.GetErrors()));
@@ -34,7 +34,7 @@ public class AccountController : ApiController
             return BadRequest(ResultViewModel<string>.Fail("Perfil inválido"));
 
         var (user, password, error) = await AccountFactory.InviteStudentAsync(
-            context, emailService, model, roleSlug);
+            context, notifications, model, roleSlug);
 
         return error != null
             ? BadRequest(ResultViewModel<string>.Fail(error))

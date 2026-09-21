@@ -4,6 +4,7 @@
 @inherits AuthenticatedComponent
 @inject ScopeRunner Scope
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>@(_post?.Title ?? "Post") · Lingua</PageTitle>
 
@@ -18,15 +19,23 @@ else if (_post == null)
         <p class="muted">Ele foi removido ou pertence a uma turma da qual você não participa.</p>
     </div>
 }
+else if (_editing)
+{
+    <PostComposer EditPostId="Id" OnPublished="StopEditingAsync" OnCancelled="StopEditingAsync" />
+}
 else
 {
     <article class="card">
         <div class="post-head">
-            <AvatarView Image="_post.AuthorImage" Name="_post.AuthorName" />
+            <AvatarView Image="@_post.AuthorImage" Name="@_post.AuthorName" />
             <div>
                 <a href="@($"/perfil/{_post.AuthorSlug}")">@_post.AuthorName</a>
                 <div class="small muted">
                     @ShortDate(_post.CreatedAt)
+                    @if (_post.LastUpdateDate - _post.CreatedAt > TimeSpan.FromMinutes(1))
+                    {
+                        <span> · editado</span>
+                    }
                     <span> · </span>
                     <span class="badge @(_post.Classroom == null ? "" : "accent")">
                         @(_post.Classroom ?? "Mural geral")
@@ -43,6 +52,8 @@ else
         <p class="muted">@_post.Summary</p>
         <div class="post-body">@_post.Body</div>
 
+        <MediaGallery Items="_post.Media" />
+
         @if (_post.Tags.Count > 0)
         {
             <div class="row" style="margin-top:.75rem">
@@ -57,6 +68,11 @@ else
             <button class="btn ghost small" type="button" @onclick="ToggleReactionAsync">
                 @(_post.ReactedByMe ? "Curtido" : "Curtir") · @_post.Reactions
             </button>
+
+            @if (_post.CanEdit)
+            {
+                <button class="btn ghost small" type="button" @onclick="() => _editing = true">Editar</button>
+            }
 
             @if (_post.CanModerate)
             {
@@ -73,45 +89,60 @@ else
     </article>
 
     <div class="card" style="margin-top:1rem">
-        <h2>Comentários (@_post.Comments.Count)</h2>
+        <h2>Comentários (@CountComments(_post.Comments))</h2>
 
         @if (_error != null)
         {
             <div class="alert error">@_error</div>
         }
 
+        @if (_replyTo != null)
+        {
+            <div class="reply-to">
+                <span>Respondendo a <b>@_replyTo.AuthorName</b></span>
+                <button class="link-btn" type="button" @onclick="() => _replyTo = null">cancelar</button>
+            </div>
+        }
+
         <EditForm Model="_comment" OnValidSubmit="CommentAsync" FormName="comment">
             <DataAnnotationsValidator />
-            <div class="field">
-                <InputTextArea @bind-Value="_comment.Body" placeholder="Leave a comment in English..." />
+
+            @if (_comment.MediaUrl != null)
+            {
+                <div class="attached-gif">
+                    <img src="@_comment.MediaUrl" alt="" />
+                    <button class="remove" type="button" style="position:absolute;top:-6px;right:-6px" @onclick="() => _comment.MediaUrl = null">×</button>
+                </div>
+            }
+
+            <div class="field" style="margin-bottom:.25rem">
+                <InputTextArea id="comment-body" @bind-Value="_comment.Body"
+                               placeholder="@(_replyTo == null ? "Leave a comment in English..." : $"Reply to {_replyTo.AuthorName}...")" />
                 <ValidationMessage For="() => _comment.Body" />
             </div>
-            <button class="btn" type="submit" disabled="@_saving">Comentar</button>
+
+            <div class="toolbar">
+                <EmojiPicker TargetId="comment-body" />
+                <GifPicker OnPick="url => _comment.MediaUrl = url" />
+                <button class="btn small" type="submit" disabled="@_saving" style="margin-left:auto">
+                    @(_replyTo == null ? "Comentar" : "Responder")
+                </button>
+            </div>
         </EditForm>
 
         @foreach (var comment in _post.Comments)
         {
-            <div class="comment">
-                <AvatarView Image="comment.AuthorImage" Name="comment.AuthorName" Size="small" />
-                <div style="flex:1">
-                    <div class="small">
-                        <a href="@($"/perfil/{comment.AuthorSlug}")">@comment.AuthorName</a>
-                        <span class="muted"> · @RelativeDate(comment.CreatedAt)</span>
-                        @if (comment.Status == ModerationStatus.Hidden)
-                        {
-                            <span class="badge warn">Escondido</span>
-                        }
-                    </div>
-                    <div>@comment.Body</div>
-                </div>
+            @RenderComment(comment)
 
-                @if (_post.CanModerate)
-                {
-                    <button class="btn ghost small" type="button" @onclick="() => ToggleCommentAsync(comment)">
-                        @(comment.Status == ModerationStatus.Hidden ? "Liberar" : "Esconder")
-                    </button>
-                }
-            </div>
+            @if (comment.Replies.Count > 0)
+            {
+                <div class="replies">
+                    @foreach (var reply in comment.Replies)
+                    {
+                        @RenderComment(reply)
+                    }
+                </div>
+            }
         }
     </div>
 }
@@ -121,9 +152,70 @@ else
 
     private PostDetailsViewModel? _post;
     private EditorCommentViewModel _comment = new();
+    private CommentViewModel? _replyTo;
+    private CommentViewModel? _editingComment;
+    private string _editBody = string.Empty;
     private bool _loading = true;
+    private bool _editing;
     private bool _saving;
     private string? _error;
+
+    private RenderFragment RenderComment(CommentViewModel comment) => __builder =>
+    {
+        <div class="comment">
+            <AvatarView Image="@comment.AuthorImage" Name="@comment.AuthorName" Size="small" />
+            <div style="flex:1">
+                <div class="small">
+                    <a href="@($"/perfil/{comment.AuthorSlug}")">@comment.AuthorName</a>
+                    <span class="muted"> · @RelativeDate(comment.CreatedAt)</span>
+                    @if (comment.EditedAt != null)
+                    {
+                        <span class="muted"> · editado</span>
+                    }
+                    @if (comment.Status == ModerationStatus.Hidden)
+                    {
+                        <span class="badge warn">Escondido</span>
+                    }
+                </div>
+
+                @if (_editingComment?.Id == comment.Id)
+                {
+                    <textarea id="@($"edit-{comment.Id}")" @bind="_editBody" @bind:event="oninput" style="margin-top:.35rem"></textarea>
+                    <div class="toolbar">
+                        <EmojiPicker TargetId="@($"edit-{comment.Id}")" />
+                        <button class="btn small" type="button" @onclick="SaveCommentAsync">Salvar</button>
+                        <button class="btn ghost small" type="button" @onclick="() => _editingComment = null">Cancelar</button>
+                    </div>
+                }
+                else
+                {
+                    @if (!string.IsNullOrWhiteSpace(comment.Body))
+                    {
+                        <div class="body">@comment.Body</div>
+                    }
+                    @if (comment.MediaUrl != null)
+                    {
+                        <img class="media" src="@comment.MediaUrl" alt="" loading="lazy" onerror="this.style.display='none'" />
+                    }
+
+                    <div class="comment-actions">
+                        <button type="button" @onclick="() => StartReply(comment)">Responder</button>
+                        @if (comment.CanEdit)
+                        {
+                            <button type="button" @onclick="() => StartEdit(comment)">Editar</button>
+                            <button type="button" class="danger" @onclick="() => DeleteCommentAsync(comment)">Apagar</button>
+                        }
+                        @if (_post!.CanModerate)
+                        {
+                            <button type="button" @onclick="() => ToggleCommentAsync(comment)">
+                                @(comment.Status == ModerationStatus.Hidden ? "Liberar" : "Esconder")
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    };
 
     protected override async Task OnReadyAsync() => await LoadAsync();
 
@@ -135,6 +227,15 @@ else
         _loading = false;
     }
 
+    private static int CountComments(List<CommentViewModel> comments)
+        => comments.Sum(c => 1 + c.Replies.Count);
+
+    private async Task StopEditingAsync()
+    {
+        _editing = false;
+        await LoadAsync();
+    }
+
     private async Task ToggleReactionAsync()
     {
         var (reacted, total) = await Scope.UseAsync<PostService, (bool, int)>(
@@ -144,13 +245,30 @@ else
         _post.Reactions = total;
     }
 
+    private void StartReply(CommentViewModel comment)
+    {
+        _replyTo = comment;
+        _editingComment = null;
+    }
+
+    private void StartEdit(CommentViewModel comment)
+    {
+        _editingComment = comment;
+        _editBody = comment.Body;
+        _replyTo = null;
+    }
+
     private async Task CommentAsync()
     {
         _saving = true;
         _error = null;
 
+        var body = _comment.Body;
+        var parentId = _replyTo?.Id;
+        var mediaUrl = _comment.MediaUrl;
+
         var (_, error) = await Scope.UseAsync<PostService, (Comment?, string?)>(
-            service => service.AddCommentAsync(UserId, Id, _comment.Body));
+            service => service.AddCommentAsync(UserId, Id, body, parentId, mediaUrl));
 
         _saving = false;
 
@@ -161,6 +279,45 @@ else
         }
 
         _comment = new EditorCommentViewModel();
+        _replyTo = null;
+        await LoadAsync();
+    }
+
+    private async Task SaveCommentAsync()
+    {
+        if (_editingComment == null)
+            return;
+
+        var commentId = _editingComment.Id;
+        var body = _editBody;
+
+        var (_, error) = await Scope.UseAsync<PostService, (bool, string?)>(
+            service => service.UpdateCommentAsync(UserId, commentId, body));
+
+        if (error != null)
+        {
+            _error = error;
+            return;
+        }
+
+        _editingComment = null;
+        await LoadAsync();
+    }
+
+    private async Task DeleteCommentAsync(CommentViewModel comment)
+    {
+        if (!await JS.InvokeAsync<bool>("lingua.confirm", "Apagar este comentário? As respostas dele também somem."))
+            return;
+
+        var (_, error) = await Scope.UseAsync<PostService, (bool, string?)>(
+            service => service.DeleteCommentAsync(UserId, comment.Id));
+
+        if (error != null)
+        {
+            _error = error;
+            return;
+        }
+
         await LoadAsync();
     }
 
@@ -186,6 +343,9 @@ else
 
     private async Task DeleteAsync()
     {
+        if (!await JS.InvokeAsync<bool>("lingua.confirm", "Apagar este post de vez? Os comentários somem junto."))
+            return;
+
         var (ok, error) = await Scope.UseAsync<PostService, (bool, string?)>(
             service => service.DeleteAsync(UserId, Id));
 

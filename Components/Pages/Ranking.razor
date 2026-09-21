@@ -44,7 +44,7 @@
         {
             <div class="rank-row @(entry.Position <= 3 ? "top-3" : "")">
                 <span class="rank-position">@entry.Position</span>
-                <AvatarView Image="entry.Image" Name="entry.Name" />
+                <AvatarView Image="@entry.Image" Name="@entry.Name" />
                 <div>
                     <a href="@($"/perfil/{entry.Slug}")">@entry.Name</a>
                     <div class="small muted">@entry.Interactions interações · @entry.Level</div>

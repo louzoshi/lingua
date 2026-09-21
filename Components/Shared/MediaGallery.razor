@@ -1,0 +1,22 @@
+@if (Items.Count > 0)
+{
+    <div class="media-grid @(Items.Count == 1 ? "single" : "")">
+        @foreach (var item in Items)
+        {
+            @if (item.Kind == MediaKind.Video)
+            {
+                <video src="@item.Url" controls preload="metadata"></video>
+            }
+            else
+            {
+                <a href="@item.Url" target="_blank" rel="noopener">
+                    <img src="@item.Url" alt="" loading="lazy" onerror="this.parentElement.style.display='none'" />
+                </a>
+            }
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public List<MediaViewModel> Items { get; set; } = new();
+}

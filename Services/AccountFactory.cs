@@ -8,15 +8,15 @@ using SecureIdentity.Password;
 namespace Lingua.Services;
 
 /// <summary>
-/// Criação de contas. Não existe cadastro aberto na plataforma: o professor convida, a
-/// senha inicial é gerada aqui e enviada por e-mail. A API e a tela de gerenciar usam este
-/// mesmo caminho para que a regra não se divida em dois lugares.
+/// Criação de contas. Não existe cadastro aberto na plataforma: o professor convida e a
+/// senha inicial é gerada aqui. A API e a tela de gerenciar usam este mesmo caminho para
+/// que a regra não se divida em dois lugares.
 /// </summary>
 public static class AccountFactory
 {
     public static async Task<(User? User, string? Password, string? Error)> InviteStudentAsync(
         LinguaDataContext context,
-        EmailService emailService,
+        NotificationService notifications,
         RegisterViewModel model,
         string roleSlug = Role.Student)
     {
@@ -49,14 +49,12 @@ public static class AccountFactory
         }
 
         await context.Users.AddAsync(user);
-        await context.SaveChangesAsync();
 
-        emailService.Send(
-            user.Name,
-            user.Email,
-            "Welcome to Lingua!",
-            $"<p>Olá, {user.Name}!</p><p>Sua conta foi criada. Entre com <b>{user.Email}</b> " +
-            $"e a senha <b>{password}</b>, e troque a senha no primeiro acesso.</p>");
+        // O convite entra na mesma transação do aluno. Quem entrega é o worker de notificações:
+        // a professora não fica esperando o servidor de e-mail responder para ver a tela voltar.
+        notifications.QueueStudentInvite(user, password);
+
+        await context.SaveChangesAsync();
 
         return (user, password, null);
     }

@@ -67,6 +67,9 @@ public class PostService
                 ClassroomId = x.ClassroomId,
                 Classroom = x.Classroom != null ? x.Classroom.Name : null,
                 Topic = x.Topic != null ? x.Topic.Name : null,
+                CoverUrl = x.Media.OrderBy(m => m.Position).Select(m => m.Url).FirstOrDefault(),
+                CoverKind = x.Media.OrderBy(m => m.Position).Select(m => (MediaKind?)m.Kind).FirstOrDefault(),
+                MediaCount = x.Media.Count,
                 Comments = x.Comments.Count(c => c.Status == ModerationStatus.Published),
                 Reactions = x.Reactions.Count,
                 ReactedByMe = x.Reactions.Any(r => r.UserId == userId)
@@ -102,12 +105,38 @@ public class PostService
             .Include(x => x.Topic)
             .Include(x => x.Tags)
             .Include(x => x.Reactions)
+            .Include(x => x.Media.OrderBy(m => m.Position))
             .Include(x => x.Comments.OrderBy(c => c.CreatedAt))
             .ThenInclude(c => c.Author)
             .FirstOrDefaultAsync(x => x.Id == postId);
 
         if (post == null)
             return null;
+
+        // Comentário escondido some para os alunos, e leva as respostas junto.
+        var visible = post.Comments
+            .Where(c => c.Status == ModerationStatus.Published || isStaff || c.AuthorId == userId)
+            .ToList();
+
+        CommentViewModel ToViewModel(Comment c) => new()
+        {
+            Id = c.Id,
+            Body = c.Body,
+            CreatedAt = c.CreatedAt,
+            EditedAt = c.EditedAt,
+            Status = c.Status,
+            ParentId = c.ParentId,
+            MediaUrl = c.MediaUrl,
+            AuthorId = c.AuthorId,
+            AuthorName = c.Author.Name,
+            AuthorSlug = c.Author.Slug,
+            AuthorImage = c.Author.Image,
+            CanEdit = c.AuthorId == userId || isStaff,
+            Replies = visible
+                .Where(r => r.ParentId == c.Id)
+                .Select(ToViewModel)
+                .ToList()
+        };
 
         return new PostDetailsViewModel
         {
@@ -131,19 +160,12 @@ public class PostService
             ReactedByMe = post.Reactions.Any(r => r.UserId == userId),
             CanEdit = post.AuthorId == userId || isStaff,
             CanModerate = isStaff,
-            Comments = post.Comments
-                .Where(c => c.Status == ModerationStatus.Published || isStaff || c.AuthorId == userId)
-                .Select(c => new CommentViewModel
-                {
-                    Id = c.Id,
-                    Body = c.Body,
-                    CreatedAt = c.CreatedAt,
-                    Status = c.Status,
-                    AuthorId = c.AuthorId,
-                    AuthorName = c.Author.Name,
-                    AuthorSlug = c.Author.Slug,
-                    AuthorImage = c.Author.Image
-                })
+            Media = post.Media
+                .Select(m => new MediaViewModel { Id = m.Id, Url = m.Url, Kind = m.Kind })
+                .ToList(),
+            Comments = visible
+                .Where(c => c.ParentId == null)
+                .Select(ToViewModel)
                 .ToList()
         };
     }
@@ -155,6 +177,9 @@ public class PostService
         {
             return (null, "Você não participa desta turma");
         }
+
+        if (!model.ClassroomId.HasValue && !await _access.HasSchoolAccessAsync(authorId))
+            return (null, "Você precisa estar matriculado em uma turma para publicar");
 
         var post = new Post
         {
@@ -173,6 +198,10 @@ public class PostService
         foreach (var tag in await ResolveTagsAsync(model.Tags))
             post.Tags.Add(tag);
 
+        var position = 0;
+        foreach (var item in model.Media.Take(10))
+            post.Media.Add(new PostMedia { Url = item.Url, Kind = item.Kind, Position = position++ });
+
         await _context.Posts.AddAsync(post);
         _interactions.Track(authorId, InteractionType.PostCreated, model.ClassroomId);
         await _context.SaveChangesAsync();
@@ -182,7 +211,11 @@ public class PostService
 
     public async Task<(bool Ok, string? Error)> UpdateAsync(int userId, int postId, EditorPostViewModel model)
     {
-        var post = await _context.Posts.Include(x => x.Tags).FirstOrDefaultAsync(x => x.Id == postId);
+        var post = await _context.Posts
+            .Include(x => x.Tags)
+            .Include(x => x.Media)
+            .FirstOrDefaultAsync(x => x.Id == postId);
+
         if (post == null)
             return (false, "Post não encontrado");
 
@@ -199,9 +232,39 @@ public class PostService
         foreach (var tag in await ResolveTagsAsync(model.Tags))
             post.Tags.Add(tag);
 
+        post.Media.Clear();
+        var position = 0;
+        foreach (var item in model.Media.Take(10))
+            post.Media.Add(new PostMedia { Url = item.Url, Kind = item.Kind, Position = position++ });
+
         await _context.SaveChangesAsync();
 
         return (true, null);
+    }
+
+    public async Task<EditorPostViewModel?> GetForEditAsync(int userId, int postId)
+    {
+        var post = await _context.Posts
+            .AsNoTracking()
+            .Include(x => x.Tags)
+            .Include(x => x.Media.OrderBy(m => m.Position))
+            .FirstOrDefaultAsync(x => x.Id == postId);
+
+        if (post == null || (post.AuthorId != userId && !await _access.IsStaffAsync(userId)))
+            return null;
+
+        return new EditorPostViewModel
+        {
+            Title = post.Title,
+            Summary = post.Summary,
+            Body = post.Body,
+            ClassroomId = post.ClassroomId,
+            TopicId = post.TopicId,
+            Tags = string.Join(", ", post.Tags.Select(t => t.Name)),
+            Media = post.Media
+                .Select(m => new EditorPostViewModel.MediaItem { Url = m.Url, Kind = m.Kind })
+                .ToList()
+        };
     }
 
     public async Task<(bool Ok, string? Error)> DeleteAsync(int userId, int postId)
@@ -250,7 +313,12 @@ public class PostService
         return (reaction == null, total);
     }
 
-    public async Task<(Comment? Comment, string? Error)> AddCommentAsync(int userId, int postId, string body)
+    public async Task<(Comment? Comment, string? Error)> AddCommentAsync(
+        int userId,
+        int postId,
+        string body,
+        int? parentId = null,
+        string? mediaUrl = null)
     {
         var post = await _context.Posts.FirstOrDefaultAsync(x => x.Id == postId);
         if (post == null)
@@ -262,10 +330,31 @@ public class PostService
             return (null, "Você não participa desta turma");
         }
 
+        if (!post.ClassroomId.HasValue && !await _access.HasSchoolAccessAsync(userId))
+            return (null, "Você precisa estar matriculado em uma turma para comentar");
+
+        if (string.IsNullOrWhiteSpace(body) && string.IsNullOrWhiteSpace(mediaUrl))
+            return (null, "Escreva algo ou escolha um GIF");
+
+        if (parentId.HasValue)
+        {
+            // Resposta de resposta pendura no mesmo pai: a conversa fica em um nível só.
+            var parent = await _context.Comments
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == parentId.Value && x.PostId == postId);
+
+            if (parent == null)
+                return (null, "O comentário respondido não existe mais");
+
+            parentId = parent.ParentId ?? parent.Id;
+        }
+
         var comment = new Comment
         {
             PostId = postId,
             AuthorId = userId,
+            ParentId = parentId,
+            MediaUrl = mediaUrl,
             Body = body.Trim()
         };
 
@@ -274,6 +363,41 @@ public class PostService
         await _context.SaveChangesAsync();
 
         return (comment, null);
+    }
+
+    public async Task<(bool Ok, string? Error)> UpdateCommentAsync(int userId, int commentId, string body)
+    {
+        var comment = await _context.Comments.FirstOrDefaultAsync(x => x.Id == commentId);
+        if (comment == null)
+            return (false, "Comentário não encontrado");
+
+        if (comment.AuthorId != userId && !await _access.IsStaffAsync(userId))
+            return (false, "Você não pode editar este comentário");
+
+        if (string.IsNullOrWhiteSpace(body) && string.IsNullOrWhiteSpace(comment.MediaUrl))
+            return (false, "O comentário não pode ficar vazio");
+
+        comment.Body = body.Trim();
+        comment.EditedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        return (true, null);
+    }
+
+    /// <summary>Apaga de vez. As respostas caem junto por cascata.</summary>
+    public async Task<(bool Ok, string? Error)> DeleteCommentAsync(int userId, int commentId)
+    {
+        var comment = await _context.Comments.FirstOrDefaultAsync(x => x.Id == commentId);
+        if (comment == null)
+            return (false, "Comentário não encontrado");
+
+        if (comment.AuthorId != userId && !await _access.IsStaffAsync(userId))
+            return (false, "Você não pode apagar este comentário");
+
+        _context.Comments.Remove(comment);
+        await _context.SaveChangesAsync();
+
+        return (true, null);
     }
 
     /// <summary>Moderação do professor: esconde ou devolve ao ar um post.</summary>

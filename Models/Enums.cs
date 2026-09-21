@@ -54,3 +54,47 @@ public enum InteractionType
     LessonAttended = 6,
     AssignmentSubmitted = 7
 }
+
+/// <summary>Tipo de arquivo anexado a um post.</summary>
+public enum MediaKind
+{
+    Image = 1,
+    Video = 2,
+    Gif = 3
+}
+
+/// <summary>Situação do plano financeiro de um aluno.</summary>
+public enum PlanStatus
+{
+    /// <summary>Aluno pagando e frequentando.</summary>
+    Active = 1,
+
+    /// <summary>Pausa combinada, sem cobrança no período.</summary>
+    Paused = 2,
+
+    /// <summary>Plano encerrado.</summary>
+    Ended = 3
+}
+
+/// <summary>O que originou uma notificação na fila de saída.</summary>
+public enum NotificationKind
+{
+    /// <summary>Convite de aluno, com a senha inicial.</summary>
+    StudentInvite = 1,
+
+    /// <summary>Aviso de mensalidade perto do vencimento.</summary>
+    BillingReminder = 2
+}
+
+/// <summary>Situação de uma notificação na fila de saída.</summary>
+public enum NotificationStatus
+{
+    /// <summary>Esperando o worker pegar, ou aguardando a próxima tentativa.</summary>
+    Pending = 1,
+
+    /// <summary>Entregue.</summary>
+    Sent = 2,
+
+    /// <summary>Desistiu depois de esgotar as tentativas. Fica no banco para a professora ver.</summary>
+    Failed = 3
+}

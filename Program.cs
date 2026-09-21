@@ -4,9 +4,11 @@ using System.Text.Json.Serialization;
 using Lingua;
 using Lingua.Components;
 using Lingua.Data;
+using Lingua.Extensions;
 using Lingua.Hubs;
 using Lingua.Models;
 using Lingua.Services;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.ResponseCompression;
@@ -44,6 +46,16 @@ app.UseAntiforgery();
 
 app.MapControllers();
 app.MapHub<ChatHub>("/hubs/chat");
+
+// O PDF do contrato fica fora do wwwroot e só sai por aqui, para a professora.
+app.MapGet("/financeiro/contratos/{planId:int}", async (int planId, FinanceService finance) =>
+{
+    var file = await finance.ContractFileAsync(planId);
+
+    return file is null
+        ? Results.NotFound()
+        : Results.File(file.Value.Path, "application/pdf", enableRangeProcessing: true);
+}).RequireAuthorization(Policies.Teacher);
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 
 await Seeder.SeedAsync(app.Services, app.Configuration);
@@ -86,6 +98,18 @@ void ConfigureAuthentication(WebApplicationBuilder builder)
             options.SlidingExpiration = true;
             options.Cookie.HttpOnly = true;
             options.Cookie.SameSite = SameSiteMode.Lax;
+
+            // Conta desativada derruba a sessão na próxima requisição, não quando o cookie vencer.
+            options.Events.OnValidatePrincipal = async context =>
+            {
+                var guard = context.HttpContext.RequestServices.GetRequiredService<SessionGuard>();
+
+                if (context.Principal == null || !await guard.IsActiveAsync(context.Principal.GetUserId()))
+                {
+                    context.RejectPrincipal();
+                    await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                }
+            };
         })
         .AddJwtBearer(options =>
         {
@@ -100,6 +124,13 @@ void ConfigureAuthentication(WebApplicationBuilder builder)
             // O hub de chat recebe o token pela query string, que é como o WebSocket consegue mandar.
             options.Events = new JwtBearerEvents
             {
+                OnTokenValidated = async context =>
+                {
+                    var guard = context.HttpContext.RequestServices.GetRequiredService<SessionGuard>();
+
+                    if (context.Principal == null || !await guard.IsActiveAsync(context.Principal.GetUserId()))
+                        context.Fail("Conta desativada");
+                },
                 OnMessageReceived = context =>
                 {
                     var accessToken = context.Request.Query["access_token"];
@@ -157,6 +188,9 @@ void ConfigureServices(WebApplicationBuilder builder)
 {
     builder.Services.AddSingleton<ScopeRunner>();
     builder.Services.AddSingleton<ChatNotifier>();
+    builder.Services.AddSingleton<SessionGuard>();
+    builder.Services.AddSingleton<MediaStorage>();
+    builder.Services.AddHttpClient<GifService>();
 
     builder.Services.AddScoped<AccessService>();
     builder.Services.AddScoped<ClassroomService>();
@@ -164,7 +198,9 @@ void ConfigureServices(WebApplicationBuilder builder)
     builder.Services.AddScoped<ProfileService>();
     builder.Services.AddScoped<ConversationService>();
     builder.Services.AddScoped<InteractionService>();
+    builder.Services.AddScoped<StudentService>();
+    builder.Services.AddScoped<FinanceService>();
+    builder.Services.AddScoped<NotificationService>();
 
     builder.Services.AddTransient<TokenService>();
-    builder.Services.AddTransient<EmailService>();
 }

@@ -182,10 +182,13 @@ else
                 .OrderByDescending(x => x.ScheduledAt)
                 .ToList();
 
+            // Material "toda a escola" só para quem ainda está em alguma turma.
+            var hasSchoolAccess = await access.HasSchoolAccessAsync(userId);
+
             _resources = await context
                 .StudyResources
                 .AsNoTracking()
-                .Where(x => x.ClassroomId == null || visibleIds.Contains(x.ClassroomId.Value))
+                .Where(x => (x.ClassroomId == null && hasSchoolAccess) || (x.ClassroomId != null && visibleIds.Contains(x.ClassroomId.Value)))
                 .OrderByDescending(x => x.CreatedAt)
                 .Select(x => new ListStudyResourcesViewModel
                 {

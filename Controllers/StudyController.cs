@@ -170,11 +170,12 @@ public class StudyController : ApiController
         [FromQuery] ResourceKind? kind = null)
     {
         var visibleIds = await access.VisibleClassroomIdsAsync(CurrentUserId);
+        var hasSchoolAccess = await access.HasSchoolAccessAsync(CurrentUserId);
 
         var query = context
             .StudyResources
             .AsNoTracking()
-            .Where(x => x.ClassroomId == null || visibleIds.Contains(x.ClassroomId.Value));
+            .Where(x => (x.ClassroomId == null && hasSchoolAccess) || (x.ClassroomId != null && visibleIds.Contains(x.ClassroomId.Value)));
 
         if (classroomId.HasValue)
             query = query.Where(x => x.ClassroomId == classroomId.Value);

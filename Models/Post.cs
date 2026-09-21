@@ -30,4 +30,5 @@ public class Post
     public IList<Tag> Tags { get; set; } = new List<Tag>();
     public IList<Comment> Comments { get; set; } = new List<Comment>();
     public IList<Reaction> Reactions { get; set; } = new List<Reaction>();
+    public IList<PostMedia> Media { get; set; } = new List<PostMedia>();
 }

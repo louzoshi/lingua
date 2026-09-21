@@ -20,6 +20,11 @@ public class ListPostsViewModel
     public int? ClassroomId { get; set; }
     public string? Topic { get; set; }
 
+    /// <summary>Primeira mídia do post, para a prévia no feed.</summary>
+    public string? CoverUrl { get; set; }
+    public MediaKind? CoverKind { get; set; }
+    public int MediaCount { get; set; }
+
     public int Comments { get; set; }
     public int Reactions { get; set; }
     public bool ReactedByMe { get; set; }

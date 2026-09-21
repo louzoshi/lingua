@@ -18,6 +18,9 @@ public class User
     public DateTime LastSeenAt { get; set; } = DateTime.UtcNow;
     public bool IsActive { get; set; } = true;
 
+    /// <summary>Quando o professor desativou a conta. Nulo enquanto o acesso está liberado.</summary>
+    public DateTime? DeactivatedAt { get; set; }
+
     public IList<Role> Roles { get; set; } = new List<Role>();
     public IList<Post> Posts { get; set; } = new List<Post>();
     public IList<Comment> Comments { get; set; } = new List<Comment>();

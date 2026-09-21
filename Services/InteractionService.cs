@@ -78,11 +78,12 @@ public class InteractionService
         var userIds = totals.Select(x => x.UserId).ToList();
         var users = await _context.Users
             .AsNoTracking()
-            .Where(x => userIds.Contains(x.Id))
+            .Where(x => userIds.Contains(x.Id) && x.IsActive)
             .Select(x => new { x.Id, x.Name, x.Slug, x.Image, x.Level })
             .ToListAsync();
 
         return totals
+            .Where(total => users.Any(u => u.Id == total.UserId))
             .Select((total, index) =>
             {
                 var user = users.First(u => u.Id == total.UserId);

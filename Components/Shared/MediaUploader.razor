@@ -1,0 +1,64 @@
+@inject MediaStorage Storage
+
+<label class="btn ghost small file-btn" title="Imagem ou vídeo">
+    📎 @(Label)
+    <InputFile OnChange="OnFilesAsync" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" disabled="@_busy" />
+</label>
+
+@if (_busy)
+{
+    <span class="small muted">Enviando @_current...</span>
+}
+
+@if (_error != null)
+{
+    <span class="small" style="color:var(--danger)">@_error</span>
+}
+
+@code {
+    [Parameter] public string Label { get; set; } = "Foto ou vídeo";
+    [Parameter] public EventCallback<EditorPostViewModel.MediaItem> OnUploaded { get; set; }
+
+    private bool _busy;
+    private string? _current;
+    private string? _error;
+
+    private async Task OnFilesAsync(InputFileChangeEventArgs args)
+    {
+        _error = null;
+        _busy = true;
+
+        foreach (var file in args.GetMultipleFiles(10))
+        {
+            _current = file.Name;
+            StateHasChanged();
+
+            if (!MediaStorage.IsAllowedMedia(file.ContentType))
+            {
+                _error = $"{file.Name}: formato não aceito.";
+                continue;
+            }
+
+            var limit = MediaStorage.LimitFor(file.ContentType);
+            if (file.Size > limit)
+            {
+                _error = $"{file.Name}: acima de {limit / 1024 / 1024} MB.";
+                continue;
+            }
+
+            await using var stream = file.OpenReadStream(limit);
+            var (url, kind, error) = await Storage.SaveMediaAsync(stream, file.ContentType);
+
+            if (error != null)
+            {
+                _error = error;
+                continue;
+            }
+
+            await OnUploaded.InvokeAsync(new EditorPostViewModel.MediaItem { Url = url!, Kind = kind });
+        }
+
+        _busy = false;
+        _current = null;
+    }
+}

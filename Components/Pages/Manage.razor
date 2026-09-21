@@ -4,6 +4,7 @@
 @inherits AuthenticatedComponent
 @using Microsoft.EntityFrameworkCore
 @inject ScopeRunner Scope
+@inject IJSRuntime JS
 
 <PageTitle>Gerenciar · Lingua</PageTitle>
 
@@ -61,15 +62,31 @@
     </div>
 
     <div class="grid" style="margin-top:1rem">
-        @foreach (var classroom in _classrooms)
+        @foreach (var classroom in _allClassrooms)
         {
-            <div class="card">
+            <div class="card" style="@(classroom.IsArchived ? "opacity:.6" : "")">
                 <div class="row between">
                     <h3>@classroom.Name</h3>
-                    <span class="badge accent">@classroom.Level</span>
+                    <span class="row" style="gap:.3rem">
+                        <span class="badge accent">@classroom.Level</span>
+                        @if (classroom.IsArchived)
+                        {
+                            <span class="badge warn">Arquivada</span>
+                        }
+                    </span>
                 </div>
                 <p class="small muted">@classroom.Students aluno(s) · @classroom.Posts post(s)</p>
-                <a class="btn ghost small" href="@($"/turmas/{classroom.Id}")">Abrir mural</a>
+                <div class="row">
+                    @if (classroom.IsArchived)
+                    {
+                        <button class="btn ghost small" type="button" @onclick="() => RestoreClassroomAsync(classroom)">Reabrir turma</button>
+                    }
+                    else
+                    {
+                        <a class="btn ghost small" href="@($"/turmas/{classroom.Id}")">Abrir mural</a>
+                        <button class="btn danger small" type="button" @onclick="() => ArchiveClassroomAsync(classroom)">Arquivar</button>
+                    }
+                </div>
             </div>
         }
     </div>
@@ -142,6 +159,102 @@ else if (_tab == "Alunos")
             </div>
         </div>
         <button class="btn" type="button" @onclick="EnrollAsync">Matricular</button>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+        <div class="row between">
+            <h2>Alunos da escola</h2>
+            <span class="small muted">@_overview.Count(x => x.IsActive) com acesso · @_overview.Count(x => !x.IsActive) desativado(s)</span>
+        </div>
+        <p class="small muted">
+            Remover da turma tira o aluno daquele mural. Sem nenhuma turma, ele perde o mural geral e os contatos.
+            Desativar bloqueia o login na hora; nada é apagado e dá para reativar depois.
+        </p>
+
+        @if (_overview.Count == 0)
+        {
+            <p class="muted">Nenhum aluno convidado ainda.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Aluno</th>
+                            <th>Nível</th>
+                            <th>Turmas</th>
+                            <th>Atividade</th>
+                            <th>Acesso</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var student in _overview)
+                        {
+                            <tr class="@(student.IsActive ? "" : "inactive")">
+                                <td>
+                                    <div class="row" style="gap:.5rem;flex-wrap:nowrap">
+                                        <AvatarView Image="@student.Image" Name="@student.Name" Size="small" />
+                                        <div>
+                                            <a href="@($"/perfil/{student.Slug}")">@student.Name</a>
+                                            <div class="small muted">@student.Email</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="badge accent">@student.Level</span></td>
+                                <td>
+                                    <div class="chips">
+                                        @foreach (var classroom in student.Classrooms)
+                                        {
+                                            <span class="chip">
+                                                @classroom.Name
+                                                <button type="button" title="Remover da turma" @onclick="() => UnenrollAsync(student, classroom)">×</button>
+                                            </span>
+                                        }
+                                        @if (student.Classrooms.Count == 0)
+                                        {
+                                            <span class="badge danger">Sem turma</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td class="small muted">
+                                    @student.Posts post(s) · @student.Comments coment.<br />
+                                    visto @RelativeDate(student.LastSeenAt)
+                                </td>
+                                <td>
+                                    @if (student.IsActive)
+                                    {
+                                        <span class="badge ok">Ativo</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge danger">Desativado</span>
+                                        <div class="small muted">@(student.DeactivatedAt is DateTime d ? ShortDate(d) : "")</div>
+                                    }
+                                </td>
+                                <td>
+                                    <div class="row" style="gap:.3rem;flex-wrap:nowrap;justify-content:flex-end">
+                                        @if (student.IsActive)
+                                        {
+                                            <button class="btn danger small" type="button" @onclick="() => DeactivateAsync(student)">Desativar</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn ghost small" type="button" @onclick="() => ReactivateAsync(student)">Reativar</button>
+                                        }
+                                        @if (student.Posts + student.Comments > 0)
+                                        {
+                                            <button class="btn ghost small" type="button" title="Esconde todos os posts e comentários deste aluno" @onclick="() => HideAllAsync(student)">Esconder tudo</button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
     </div>
 }
 else if (_tab == "Aulas")
@@ -293,7 +406,9 @@ else
     private string? _error;
 
     private List<ListClassroomsViewModel> _classrooms = new();
+    private List<ListClassroomsViewModel> _allClassrooms = new();
     private List<User> _students = new();
+    private List<StudentOverviewViewModel> _overview = new();
 
     private EditorClassroomViewModel _classroom = new();
     private RegisterViewModel _invite = new();
@@ -311,8 +426,90 @@ else
         _classrooms = await Scope.UseAsync<ClassroomService, List<ListClassroomsViewModel>>(
             service => service.ForUserAsync(UserId));
 
+        _allClassrooms = await Scope.UseAsync<ClassroomService, List<ListClassroomsViewModel>>(
+            service => service.AllForStaffAsync());
+
         _students = await Scope.UseAsync<ClassroomService, List<User>>(
             service => service.AllStudentsAsync());
+
+        _overview = await Scope.UseAsync<StudentService, List<StudentOverviewViewModel>>(
+            service => service.OverviewAsync());
+    }
+
+    private async Task ArchiveClassroomAsync(ListClassroomsViewModel classroom)
+    {
+        Reset();
+
+        if (!await JS.InvokeAsync<bool>("lingua.confirm",
+            $"Arquivar \"{classroom.Name}\"? Os alunos deixam de ver o mural, as aulas e os trabalhos dela. Dá para reabrir depois."))
+            return;
+
+        _error = await Scope.UseAsync<ClassroomService, string?>(service => service.ArchiveAsync(classroom.Id));
+        if (_error == null)
+            _message = $"Turma \"{classroom.Name}\" arquivada.";
+
+        await LoadAsync();
+    }
+
+    private async Task RestoreClassroomAsync(ListClassroomsViewModel classroom)
+    {
+        Reset();
+        _error = await Scope.UseAsync<ClassroomService, string?>(service => service.RestoreAsync(classroom.Id));
+        if (_error == null)
+            _message = $"Turma \"{classroom.Name}\" reaberta.";
+
+        await LoadAsync();
+    }
+
+    private async Task UnenrollAsync(StudentOverviewViewModel student, StudentOverviewViewModel.EnrolledClassroom classroom)
+    {
+        Reset();
+
+        if (!await JS.InvokeAsync<bool>("lingua.confirm", $"Remover {student.Name} de \"{classroom.Name}\"?"))
+            return;
+
+        await Scope.UseAsync<ClassroomService>(service => service.RemoveStudentAsync(classroom.Id, student.Id));
+        _message = $"{student.Name} removido(a) de \"{classroom.Name}\".";
+        await LoadAsync();
+    }
+
+    private async Task DeactivateAsync(StudentOverviewViewModel student)
+    {
+        Reset();
+
+        if (!await JS.InvokeAsync<bool>("lingua.confirm",
+            $"Desativar a conta de {student.Name}? O login é bloqueado imediatamente. Posts e comentários continuam visíveis; use \"Esconder tudo\" se quiser tirá-los do ar."))
+            return;
+
+        _error = await Scope.UseAsync<StudentService, string?>(service => service.DeactivateAsync(student.Id));
+        if (_error == null)
+            _message = $"Conta de {student.Name} desativada.";
+
+        await LoadAsync();
+    }
+
+    private async Task ReactivateAsync(StudentOverviewViewModel student)
+    {
+        Reset();
+        _error = await Scope.UseAsync<StudentService, string?>(service => service.ReactivateAsync(student.Id));
+        if (_error == null)
+            _message = $"Conta de {student.Name} reativada.";
+
+        await LoadAsync();
+    }
+
+    private async Task HideAllAsync(StudentOverviewViewModel student)
+    {
+        Reset();
+
+        if (!await JS.InvokeAsync<bool>("lingua.confirm",
+            $"Esconder todos os posts e comentários de {student.Name}? Nada é apagado; você pode republicar item a item na moderação."))
+            return;
+
+        var (posts, comments) = await Scope.UseAsync<StudentService, (int, int)>(
+            service => service.HideAllContentAsync(student.Id));
+
+        _message = $"{posts} post(s) e {comments} comentário(s) de {student.Name} escondidos.";
     }
 
     private async Task CreateClassroomAsync()
@@ -342,9 +539,9 @@ else
         var result = await Scope.RunAsync(async sp =>
         {
             var context = sp.GetRequiredService<LinguaDataContext>();
-            var email = sp.GetRequiredService<EmailService>();
+            var notifications = sp.GetRequiredService<NotificationService>();
 
-            return await AccountFactory.InviteStudentAsync(context, email, model);
+            return await AccountFactory.InviteStudentAsync(context, notifications, model);
         });
 
         if (result.Error != null)

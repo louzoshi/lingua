@@ -22,6 +22,21 @@ public class AccessService
             .Where(x => x.Id == userId)
             .AnyAsync(x => x.Roles.Any(r => r.Slug == Role.Teacher || r.Slug == Role.Admin));
 
+    /// <summary>
+    /// Se o usuário ainda faz parte da escola. Para aluno isso significa ter pelo menos uma
+    /// matrícula ativa: quem foi removido de todas as turmas perde o mural geral, os materiais
+    /// da escola e os contatos — a conta continua existindo, mas sem nada para ver.
+    /// </summary>
+    public async Task<bool> HasSchoolAccessAsync(int userId)
+    {
+        if (await IsStaffAsync(userId))
+            return true;
+
+        return await _context.Enrollments
+            .AsNoTracking()
+            .AnyAsync(x => x.StudentId == userId && x.IsActive && !x.Classroom.IsArchived);
+    }
+
     /// <summary>Turmas que o usuário pode abrir: as que leciona e as em que está matriculado.</summary>
     public async Task<List<int>> VisibleClassroomIdsAsync(int userId)
     {
@@ -63,6 +78,10 @@ public class AccessService
     {
         if (!isStaff)
         {
+            // Sem turma ativa o aluno não enxerga nem o mural geral.
+            if (classroomIds.Count == 0)
+                return source.Where(_ => false);
+
             source = source.Where(x =>
                 x.Status == ModerationStatus.Published || x.AuthorId == userId);
         }
@@ -71,11 +90,15 @@ public class AccessService
             x.ClassroomId == null || classroomIds.Contains(x.ClassroomId.Value));
     }
 
-    /// <summary>Alunos com quem este usuário divide alguma turma — o catálogo de DM permitido.</summary>
+    /// <summary>
+    /// Com quem este usuário pode abrir DM. Qualquer aluno ativo da escola fala com qualquer
+    /// outro e com a professora; quem não tem turma ativa só fala com a professora. As
+    /// conversas ficam visíveis para a professora na moderação.
+    /// </summary>
     public async Task<List<User>> ContactsForAsync(int userId)
     {
         var isStaff = await IsStaffAsync(userId);
-        var classroomIds = await VisibleClassroomIdsAsync(userId);
+        var hasSchoolAccess = await HasSchoolAccessAsync(userId);
 
         var query = _context.Users
             .AsNoTracking()
@@ -83,28 +106,29 @@ public class AccessService
 
         if (!isStaff)
         {
-            // Aluno só conversa com colegas de turma e com o professor responsável.
-            query = query.Where(x =>
-                x.Enrollments.Any(e => e.IsActive && classroomIds.Contains(e.ClassroomId)) ||
-                x.TeachingClassrooms.Any(c => classroomIds.Contains(c.Id)));
+            query = hasSchoolAccess
+                ? query.Where(x =>
+                    x.Roles.Any(r => r.Slug == Role.Teacher || r.Slug == Role.Admin) ||
+                    x.Enrollments.Any(e => e.IsActive && !e.Classroom.IsArchived))
+                : query.Where(x => x.Roles.Any(r => r.Slug == Role.Teacher || r.Slug == Role.Admin));
         }
 
         return await query.OrderBy(x => x.Name).ToListAsync();
     }
 
-    /// <summary>A DM só abre entre pessoas que se encontram em alguma turma.</summary>
+    /// <summary>A DM abre entre qualquer par de pessoas ativas da escola.</summary>
     public async Task<bool> CanMessageAsync(int userId, int otherUserId)
     {
         if (userId == otherUserId)
             return false;
 
+        var other = await _context.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == otherUserId);
+        if (other == null || !other.IsActive)
+            return false;
+
         if (await IsStaffAsync(userId) || await IsStaffAsync(otherUserId))
             return true;
 
-        var mine = await VisibleClassroomIdsAsync(userId);
-
-        return await _context.Enrollments
-            .AsNoTracking()
-            .AnyAsync(x => x.StudentId == otherUserId && x.IsActive && mine.Contains(x.ClassroomId));
+        return await HasSchoolAccessAsync(userId) && await HasSchoolAccessAsync(otherUserId);
     }
 }

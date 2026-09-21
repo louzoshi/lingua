@@ -42,6 +42,27 @@ public class ClassroomService
             .ToListAsync();
     }
 
+    /// <summary>Todas as turmas, inclusive arquivadas, para a tela de gerenciar da professora.</summary>
+    public async Task<List<ListClassroomsViewModel>> AllForStaffAsync()
+        => await _context
+            .Classrooms
+            .AsNoTracking()
+            .OrderBy(x => x.IsArchived)
+            .ThenBy(x => x.Name)
+            .Select(x => new ListClassroomsViewModel
+            {
+                Id = x.Id,
+                Name = x.Name,
+                Slug = x.Slug,
+                Description = x.Description,
+                Level = x.Level,
+                TeacherName = x.Teacher.Name,
+                Students = x.Enrollments.Count(e => e.IsActive),
+                Posts = x.Posts.Count,
+                IsArchived = x.IsArchived
+            })
+            .ToListAsync();
+
     public async Task<Classroom?> GetAsync(int userId, int classroomId)
         => await _access.CanAccessClassroomAsync(userId, classroomId)
             ? await _context
@@ -55,7 +76,7 @@ public class ClassroomService
         => await _context
             .Enrollments
             .AsNoTracking()
-            .Where(x => x.ClassroomId == classroomId && x.IsActive)
+            .Where(x => x.ClassroomId == classroomId && x.IsActive && x.Student.IsActive)
             .OrderBy(x => x.Student.Name)
             .Select(x => x.Student)
             .ToListAsync();
@@ -117,6 +138,34 @@ public class ClassroomService
 
         enrollment.IsActive = false;
         await _context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Arquiva a turma: ela some para os alunos (mural, aulas, trabalhos, contatos) e as
+    /// matrículas deixam de contar como acesso. Nada é apagado.
+    /// </summary>
+    public async Task<string?> ArchiveAsync(int classroomId)
+    {
+        var classroom = await _context.Classrooms.FirstOrDefaultAsync(x => x.Id == classroomId);
+        if (classroom == null)
+            return "Turma não encontrada";
+
+        classroom.IsArchived = true;
+        await _context.SaveChangesAsync();
+
+        return null;
+    }
+
+    public async Task<string?> RestoreAsync(int classroomId)
+    {
+        var classroom = await _context.Classrooms.FirstOrDefaultAsync(x => x.Id == classroomId);
+        if (classroom == null)
+            return "Turma não encontrada";
+
+        classroom.IsArchived = false;
+        await _context.SaveChangesAsync();
+
+        return null;
     }
 
     /// <summary>Alunos da escola, para a tela de matrícula do professor.</summary>

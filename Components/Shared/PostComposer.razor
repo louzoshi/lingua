@@ -17,33 +17,59 @@
             <div class="alert error">@_error</div>
         }
 
-        <EditForm Model="_model" OnValidSubmit="PublishAsync" FormName="composer">
+        <EditForm Model="_model" OnValidSubmit="PublishAsync" FormName="@FormName">
             <DataAnnotationsValidator />
 
             <div class="field">
-                <label for="title">Título</label>
-                <InputText id="title" @bind-Value="_model.Title" placeholder="What's on your mind?" />
+                <label for="@($"{_prefix}-title")">Título</label>
+                <InputText id="@($"{_prefix}-title")" @bind-Value="_model.Title" placeholder="What's on your mind?" />
                 <ValidationMessage For="() => _model.Title" />
             </div>
 
             <div class="field">
-                <label for="summary">Resumo</label>
-                <InputText id="summary" @bind-Value="_model.Summary" placeholder="Uma linha sobre o post" />
+                <label for="@($"{_prefix}-summary")">Resumo</label>
+                <InputText id="@($"{_prefix}-summary")" @bind-Value="_model.Summary" placeholder="Uma linha sobre o post" />
                 <ValidationMessage For="() => _model.Summary" />
             </div>
 
-            <div class="field">
-                <label for="body">Texto</label>
-                <InputTextArea id="body" @bind-Value="_model.Body" />
+            <div class="field" style="margin-bottom:.25rem">
+                <label for="@($"{_prefix}-body")">Texto</label>
+                <InputTextArea id="@($"{_prefix}-body")" @bind-Value="_model.Body" />
                 <ValidationMessage For="() => _model.Body" />
             </div>
 
+            <div class="toolbar">
+                <EmojiPicker TargetId="@($"{_prefix}-body")" />
+                <GifPicker OnPick="AddGif" />
+                <MediaUploader OnUploaded="AddMedia" />
+            </div>
+
+            @if (_model.Media.Count > 0)
+            {
+                <div class="media-pending">
+                    @foreach (var item in _model.Media)
+                    {
+                        <div class="thumb">
+                            @if (item.Kind == MediaKind.Video)
+                            {
+                                <video src="@item.Url" muted></video>
+                            }
+                            else
+                            {
+                                <img src="@item.Url" alt="" />
+                            }
+                            <button class="remove" type="button" title="Remover" @onclick="() => _model.Media.Remove(item)">×</button>
+                        </div>
+                    }
+                </div>
+            }
+
             <div class="fields-2">
-                @if (FixedClassroomId is null)
+                @if (FixedClassroomId is null && EditPostId is null)
                 {
                     <div class="field">
-                        <label for="classroom">Onde publicar</label>
-                        <InputSelect id="classroom" @bind-Value="_model.ClassroomId">
+                        <label for="@($"{_prefix}-classroom")">Onde publicar</label>
+                        <InputSelect id="@($"{_prefix}-classroom")" @bind-Value="_model.ClassroomId">
                             <option value="">Mural geral (todos os alunos)</option>
                             @foreach (var classroom in Classrooms)
                             {
@@ -54,8 +80,8 @@
                 }
 
                 <div class="field">
-                    <label for="topic">Assunto</label>
-                    <InputSelect id="topic" @bind-Value="_model.TopicId">
+                    <label for="@($"{_prefix}-topic")">Assunto</label>
+                    <InputSelect id="@($"{_prefix}-topic")" @bind-Value="_model.TopicId">
                         <option value="">Sem assunto</option>
                         @foreach (var topic in _topics)
                         {
@@ -65,14 +91,14 @@
                 </div>
 
                 <div class="field">
-                    <label for="tags">Tags</label>
-                    <InputText id="tags" @bind-Value="_model.Tags" placeholder="travel, past tense" />
+                    <label for="@($"{_prefix}-tags")">Tags</label>
+                    <InputText id="@($"{_prefix}-tags")" @bind-Value="_model.Tags" placeholder="travel, past tense" />
                 </div>
             </div>
 
             <div class="row">
-                <button class="btn" type="submit" disabled="@_saving">Publicar</button>
-                <button class="btn ghost" type="button" @onclick="Close">Cancelar</button>
+                <button class="btn" type="submit" disabled="@_saving">@(EditPostId is null ? "Publicar" : "Salvar alterações")</button>
+                <button class="btn ghost" type="button" @onclick="CloseAsync">Cancelar</button>
             </div>
         </EditForm>
     }
@@ -85,7 +111,11 @@
     [Parameter] public int? FixedClassroomId { get; set; }
     [Parameter] public string? FixedClassroomName { get; set; }
 
+    /// <summary>Preenchido, o composer edita um post existente em vez de criar um novo.</summary>
+    [Parameter] public int? EditPostId { get; set; }
+
     [Parameter] public EventCallback OnPublished { get; set; }
+    [Parameter] public EventCallback OnCancelled { get; set; }
 
     /// <summary>Em uma página dedicada a escrever, o formulário já nasce aberto.</summary>
     [Parameter] public bool StartOpen { get; set; }
@@ -95,17 +125,33 @@
     private bool _open;
     private bool _saving;
     private string? _error;
+    private readonly string _prefix = $"composer-{Guid.NewGuid():N}"[..16];
+
+    private string FormName => EditPostId is null ? "composer" : $"composer-edit-{EditPostId}";
 
     protected override async Task OnReadyAsync()
     {
-        _open = StartOpen;
+        _open = StartOpen || EditPostId is not null;
+
         _topics = await Scope.RunAsync(async sp =>
             await sp.GetRequiredService<LinguaDataContext>()
                 .Topics
                 .AsNoTracking()
                 .OrderBy(x => x.Name)
                 .ToListAsync());
+
+        if (EditPostId is int postId)
+        {
+            _model = await Scope.UseAsync<PostService, EditorPostViewModel?>(
+                service => service.GetForEditAsync(UserId, postId)) ?? new EditorPostViewModel();
+        }
     }
+
+    private void AddGif(string url)
+        => _model.Media.Add(new EditorPostViewModel.MediaItem { Url = url, Kind = MediaKind.Gif });
+
+    private void AddMedia(EditorPostViewModel.MediaItem item)
+        => _model.Media.Add(item);
 
     private async Task PublishAsync()
     {
@@ -113,9 +159,20 @@
         _error = null;
 
         _model.ClassroomId = FixedClassroomId ?? _model.ClassroomId;
+        var model = _model;
 
-        var (post, error) = await Scope.UseAsync<PostService, (Post?, string?)>(
-            service => service.CreateAsync(UserId, _model));
+        string? error;
+
+        if (EditPostId is int postId)
+        {
+            (_, error) = await Scope.UseAsync<PostService, (bool, string?)>(
+                service => service.UpdateAsync(UserId, postId, model));
+        }
+        else
+        {
+            (_, error) = await Scope.UseAsync<PostService, (Post?, string?)>(
+                service => service.CreateAsync(UserId, model));
+        }
 
         _saving = false;
 
@@ -125,11 +182,17 @@
             return;
         }
 
-        Close();
+        Reset();
         await OnPublished.InvokeAsync();
     }
 
-    private void Close()
+    private async Task CloseAsync()
+    {
+        Reset();
+        await OnCancelled.InvokeAsync();
+    }
+
+    private void Reset()
     {
         _model = new EditorPostViewModel();
         _open = StartOpen;

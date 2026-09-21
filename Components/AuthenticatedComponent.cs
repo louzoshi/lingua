@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Lingua.Extensions;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
+using Lingua.Services;
 
 namespace Lingua.Components;
 
@@ -13,6 +14,9 @@ public abstract class AuthenticatedComponent : ComponentBase
 {
     [CascadingParameter]
     public Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    [Inject] private SessionGuard Guard { get; set; } = null!;
+    [Inject] private NavigationManager Nav { get; set; } = null!;
 
     protected ClaimsPrincipal CurrentUser { get; private set; } = new(new ClaimsIdentity());
 
@@ -28,6 +32,14 @@ public abstract class AuthenticatedComponent : ComponentBase
             CurrentUser = state.User;
             UserId = CurrentUser.GetUserId();
             IsTeacher = CurrentUser.IsTeacher();
+
+            // O circuito do Blazor não passa pelo cookie a cada navegação, então a página
+            // confere por conta própria se a conta continua ativa.
+            if (UserId != 0 && !await Guard.IsActiveAsync(UserId))
+            {
+                Nav.NavigateTo("/entrar?inativa=1", forceLoad: true);
+                return;
+            }
         }
 
         await OnReadyAsync();

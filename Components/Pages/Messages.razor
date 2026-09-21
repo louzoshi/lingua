@@ -6,24 +6,35 @@
 @using Microsoft.EntityFrameworkCore
 @inject ScopeRunner Scope
 @inject ChatNotifier Notifier
+@inject IJSRuntime JS
 
 <PageTitle>Mensagens · Lingua</PageTitle>
 
 <div class="page-head">
     <h1>Mensagens</h1>
-    <p class="muted">Conversa privada com colegas de turma e com a professora.</p>
+    <p class="muted">
+        Conversa privada com colegas e com a professora.
+        @if (!IsTeacher)
+        {
+            <span>A professora pode ler as conversas quando precisar, para cuidar da turma.</span>
+        }
+    </p>
 </div>
 
 <div class="chat">
     <div class="card">
         <h2>Conversas</h2>
+        @if (_conversations.Count == 0)
+        {
+            <p class="small muted">Nenhuma conversa ainda.</p>
+        }
         <div class="chat-list">
             @foreach (var conversation in _conversations)
             {
                 <button class="chat-entry @(conversation.Id == _openId ? "active" : "")"
                         type="button"
                         @onclick="() => OpenAsync(conversation.Id, conversation.OtherUserName)">
-                    <AvatarView Image="conversation.OtherUserImage" Name="conversation.OtherUserName" Size="small" />
+                    <AvatarView Image="@conversation.OtherUserImage" Name="@conversation.OtherUserName" Size="small" />
                     <span style="flex:1">
                         <span class="small">@conversation.OtherUserName</span><br />
                         <span class="small muted">@Preview(conversation.LastMessage)</span>
@@ -36,16 +47,19 @@
             }
         </div>
 
-        <h2 style="margin-top:1rem">Começar conversa</h2>
-        <div class="chat-list">
-            @foreach (var contact in _contacts)
-            {
-                <button class="chat-entry" type="button" @onclick="() => StartAsync(contact)">
-                    <AvatarView Image="contact.Image" Name="contact.Name" Size="small" />
-                    <span class="small">@contact.Name</span>
-                </button>
-            }
-        </div>
+        @if (_newContacts.Count > 0)
+        {
+            <h2 style="margin-top:1rem">Começar conversa</h2>
+            <div class="chat-list">
+                @foreach (var contact in _newContacts)
+                {
+                    <button class="chat-entry" type="button" @onclick="() => StartAsync(contact)">
+                        <AvatarView Image="@contact.Image" Name="@contact.Name" Size="small" />
+                        <span class="small">@contact.Name</span>
+                    </button>
+                }
+            </div>
+        }
     </div>
 
     <div class="card">
@@ -58,24 +72,55 @@
             <div class="chat-thread">
                 <h2>@_openWith</h2>
 
-                <div class="chat-messages">
+                <div class="chat-messages" id="chat-messages">
                     @foreach (var message in _messages)
                     {
-                        <div class="bubble @(message.SenderId == UserId ? "mine" : "")">
+                        <div class="bubble @(message.SenderId == UserId ? "mine" : "") @(message.IsFlagged ? "flagged" : "")">
                             @if (message.SenderId != UserId)
                             {
                                 <div class="small muted">@message.SenderName</div>
                             }
-                            <div>@message.Body</div>
+                            @if (!string.IsNullOrWhiteSpace(message.Body))
+                            {
+                                <div style="white-space:pre-wrap">@message.Body</div>
+                            }
+                            @if (message.MediaUrl != null)
+                            {
+                                <img class="media" src="@message.MediaUrl" alt="" loading="lazy" onerror="this.style.display='none'" />
+                            }
                             <time>@ShortDate(message.SentAt)</time>
+
+                            @if (message.SenderId != UserId && !IsTeacher)
+                            {
+                                <div class="bubble-actions">
+                                    @if (message.IsFlagged)
+                                    {
+                                        <span class="small muted">Sinalizada para a professora</span>
+                                    }
+                                    else
+                                    {
+                                        <button class="link-btn" type="button" @onclick="() => FlagAsync(message)">Sinalizar para a professora</button>
+                                    }
+                                </div>
+                            }
                         </div>
                     }
                 </div>
 
+                @if (_gif != null)
+                {
+                    <div class="attached-gif" style="margin-top:.5rem">
+                        <img src="@_gif" alt="" />
+                        <button class="remove" type="button" style="position:absolute;top:-6px;right:-6px" @onclick="() => _gif = null">×</button>
+                    </div>
+                }
+
                 <div class="chat-compose">
-                    <input @bind="_draft" @bind:event="oninput" @onkeydown="OnKeyDownAsync"
+                    <EmojiPicker TargetId="chat-draft" />
+                    <GifPicker OnPick="url => _gif = url" />
+                    <input id="chat-draft" @bind="_draft" @bind:event="oninput" @onkeydown="OnKeyDownAsync"
                            placeholder="Type your message..." />
-                    <button class="btn" type="button" @onclick="SendAsync" disabled="@string.IsNullOrWhiteSpace(_draft)">
+                    <button class="btn" type="button" @onclick="SendAsync" disabled="@(string.IsNullOrWhiteSpace(_draft) && _gif == null)">
                         Enviar
                     </button>
                 </div>
@@ -88,15 +133,26 @@
     private readonly List<DirectMessageViewModel> _messages = new();
 
     private List<ConversationSummaryViewModel> _conversations = new();
-    private List<User> _contacts = new();
+    private List<User> _newContacts = new();
     private int _openId;
     private string? _openWith;
     private string _draft = string.Empty;
+    private string? _gif;
+    private bool _scrollPending;
 
     protected override async Task OnReadyAsync()
     {
         await LoadSidebarAsync();
         Notifier.MessageSent += OnMessage;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_scrollPending)
+        {
+            _scrollPending = false;
+            await JS.InvokeVoidAsync("lingua.scrollToBottom", "chat-messages");
+        }
     }
 
     private async Task LoadSidebarAsync()
@@ -127,8 +183,12 @@
                 .ToListAsync();
         });
 
-        _contacts = await Scope.UseAsync<AccessService, List<User>>(
+        var contacts = await Scope.UseAsync<AccessService, List<User>>(
             service => service.ContactsForAsync(UserId));
+
+        // Quem já tem conversa aberta aparece só na lista de cima.
+        var known = _conversations.Select(x => x.OtherUserId).ToHashSet();
+        _newContacts = contacts.Where(x => !known.Contains(x.Id)).ToList();
     }
 
     /// <summary>
@@ -141,7 +201,10 @@
             return;
 
         if (notification.Message.ConversationId == _openId)
+        {
             _messages.Add(notification.Message);
+            _scrollPending = true;
+        }
 
         InvokeAsync(async () =>
         {
@@ -155,30 +218,12 @@
         _openId = conversationId;
         _openWith = withName;
 
-        var messages = await Scope.RunAsync(async sp =>
-        {
-            var context = sp.GetRequiredService<LinguaDataContext>();
-
-            return await context
-                .DirectMessages
-                .AsNoTracking()
-                .Where(x => x.ConversationId == conversationId && x.Status != ModerationStatus.Hidden)
-                .OrderBy(x => x.SentAt)
-                .Select(x => new DirectMessageViewModel
-                {
-                    Id = x.Id,
-                    ConversationId = x.ConversationId,
-                    Body = x.Body,
-                    SentAt = x.SentAt,
-                    SenderId = x.SenderId,
-                    SenderName = x.Sender.Name,
-                    SenderImage = x.Sender.Image
-                })
-                .ToListAsync();
-        });
+        var messages = await Scope.UseAsync<ConversationService, List<DirectMessageViewModel>?>(
+            service => service.MessagesAsync(conversationId, UserId)) ?? new();
 
         _messages.Clear();
         _messages.AddRange(messages);
+        _scrollPending = true;
 
         await Scope.UseAsync<ConversationService>(
             service => service.MarkAsReadAsync(conversationId, UserId));
@@ -200,26 +245,37 @@
 
     private async Task SendAsync()
     {
-        if (_openId == 0 || string.IsNullOrWhiteSpace(_draft))
+        if (_openId == 0 || (string.IsNullOrWhiteSpace(_draft) && _gif == null))
             return;
 
         var body = _draft;
+        var gif = _gif;
         var conversationId = _openId;
         _draft = string.Empty;
+        _gif = null;
 
         await Scope.UseAsync<ConversationService>(
-            service => service.SendAsync(conversationId, UserId, body));
+            service => service.SendAsync(conversationId, UserId, body, gif));
+    }
+
+    private async Task FlagAsync(DirectMessageViewModel message)
+    {
+        var ok = await Scope.UseAsync<ConversationService, bool>(
+            service => service.FlagAsync(message.Id, UserId));
+
+        if (ok)
+            message.IsFlagged = true;
     }
 
     private async Task OnKeyDownAsync(KeyboardEventArgs args)
     {
-        if (args.Key == "Enter")
+        if (args.Key == "Enter" && !args.ShiftKey)
             await SendAsync();
     }
 
     private static string Preview(string? body)
         => string.IsNullOrWhiteSpace(body)
-            ? "Sem mensagens"
+            ? "GIF"
             : body.Length <= 38 ? body : body[..38] + "...";
 
     public void Dispose()

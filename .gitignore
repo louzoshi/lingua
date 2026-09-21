@@ -459,3 +459,8 @@ lingua.db-shm
 lingua.db-wal
 wwwroot/images/*
 !wwwroot/images/.gitkeep
+
+# Arquivos enviados pelos usuários
+wwwroot/uploads/*
+!wwwroot/uploads/.gitkeep
+App_Data/

@@ -1,0 +1,117 @@
+@inject GifService Gifs
+
+<span style="position:relative">
+    <button class="btn ghost small" type="button" title="GIF" @onclick="ToggleAsync">GIF</button>
+
+    @if (_open)
+    {
+        <div class="picker">
+            @if (GifService.IsConfigured)
+            {
+                <input placeholder="Search GIFs..." value="@_query" @oninput="OnQueryAsync" />
+
+                @if (_searching)
+                {
+                    <p class="small muted" style="margin:.5rem 0 0">Buscando...</p>
+                }
+                else if (_results.Count == 0 && !string.IsNullOrWhiteSpace(_query))
+                {
+                    <p class="small muted" style="margin:.5rem 0 0">Nada encontrado.</p>
+                }
+
+                <div class="gif-grid">
+                    @foreach (var gif in _results)
+                    {
+                        <button type="button" @onclick="() => PickAsync(gif.Url)">
+                            <img src="@gif.PreviewUrl" alt="" loading="lazy" />
+                        </button>
+                    }
+                </div>
+                <p class="small muted" style="margin:.5rem 0 0">Via Tenor</p>
+            }
+            else
+            {
+                <p class="small muted" style="margin:0 0 .5rem">
+                    A busca de GIFs precisa de uma chave do Tenor (<code>Tenor:ApiKey</code>). Enquanto isso, cole o link de um GIF:
+                </p>
+            }
+
+            <div class="row" style="margin-top:.5rem">
+                <input placeholder="https://...gif" @bind="_url" @bind:event="oninput" @onkeydown="OnUrlKeyAsync" style="flex:1" />
+                <button class="btn small" type="button" @onclick="PickUrlAsync" disabled="@string.IsNullOrWhiteSpace(_url)">Usar</button>
+            </div>
+        </div>
+    }
+</span>
+
+@code {
+    [Parameter] public EventCallback<string> OnPick { get; set; }
+
+    private bool _open;
+    private bool _searching;
+    private string _query = string.Empty;
+    private string _url = string.Empty;
+    private List<GifResult> _results = new();
+    private CancellationTokenSource? _debounce;
+
+    private async Task ToggleAsync()
+    {
+        _open = !_open;
+
+        if (_open && GifService.IsConfigured && _results.Count == 0)
+            await SearchAsync("hello");
+    }
+
+    private async Task OnQueryAsync(ChangeEventArgs args)
+    {
+        _query = args.Value?.ToString() ?? string.Empty;
+
+        // Espera o usuário parar de digitar antes de chamar o Tenor.
+        _debounce?.Cancel();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+
+        try
+        {
+            await Task.Delay(350, token);
+            await SearchAsync(_query);
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    private async Task SearchAsync(string query)
+    {
+        _searching = true;
+        StateHasChanged();
+
+        _results = await Gifs.SearchAsync(query);
+
+        _searching = false;
+        StateHasChanged();
+    }
+
+    private async Task PickAsync(string url)
+    {
+        _open = false;
+        await OnPick.InvokeAsync(url);
+    }
+
+    private async Task OnUrlKeyAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+            await PickUrlAsync();
+    }
+
+    private async Task PickUrlAsync()
+    {
+        var url = _url.Trim();
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != "https" && uri.Scheme != "http"))
+            return;
+
+        _url = string.Empty;
+        await PickAsync(url);
+    }
+}

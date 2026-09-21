@@ -25,4 +25,13 @@
     <Folder Include="wwwroot\images\" />
   </ItemGroup>
 
+  <!-- O projeto web mora na raiz do repositório, então o glob do SDK alcançaria o worker de
+       notificações, que é outro projeto. Este bloco tira a pasta dele do caminho. -->
+  <ItemGroup>
+    <Compile Remove="Lingua.Notifications\**" />
+    <Content Remove="Lingua.Notifications\**" />
+    <None Remove="Lingua.Notifications\**" />
+    <EmbeddedResource Remove="Lingua.Notifications\**" />
+  </ItemGroup>
+
 </Project>

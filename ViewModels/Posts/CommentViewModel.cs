@@ -13,4 +13,10 @@ public class CommentViewModel
     public string AuthorName { get; set; } = string.Empty;
     public string AuthorSlug { get; set; } = string.Empty;
     public string? AuthorImage { get; set; }
+
+    public int? ParentId { get; set; }
+    public string? MediaUrl { get; set; }
+    public DateTime? EditedAt { get; set; }
+    public bool CanEdit { get; set; }
+    public List<CommentViewModel> Replies { get; set; } = new();
 }

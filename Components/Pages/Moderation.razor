@@ -4,72 +4,185 @@
 @inherits AuthenticatedComponent
 @using Microsoft.EntityFrameworkCore
 @inject ScopeRunner Scope
+@inject IJSRuntime JS
 
 <PageTitle>Moderação · Lingua</PageTitle>
 
 <div class="page-head">
     <h1>Moderação</h1>
     <p class="muted">
-        O que os alunos escreveram recentemente e as mensagens privadas que alguém pediu para você revisar.
+        Curadoria do que os alunos publicam e acompanhamento das conversas privadas.
     </p>
 </div>
 
-<h2>Posts recentes</h2>
-<div class="stack">
-    @foreach (var post in _posts)
+<div class="row" style="margin-bottom:1rem">
+    @foreach (var tab in Tabs)
     {
-        <div class="card row between">
-            <div>
-                <a href="@($"/posts/{post.Id}")">@post.Title</a>
-                <div class="small muted">
-                    @post.AuthorName · @ShortDate(post.LastUpdateDate) ·
-                    <span class="badge">@(post.Classroom ?? "Mural geral")</span>
-                    @if (post.Status == ModerationStatus.Hidden)
-                    {
-                        <span class="badge warn">Escondido</span>
-                    }
-                </div>
-            </div>
-            <button class="btn ghost small" type="button" @onclick="() => TogglePostAsync(post)">
-                @(post.Status == ModerationStatus.Hidden ? "Republicar" : "Esconder")
-            </button>
-        </div>
+        <button class="btn @(_tab == tab ? "" : "ghost") small" type="button" @onclick="() => _tab = tab">
+            @tab
+            @if (tab == "Sinalizadas" && _flagged.Count > 0)
+            {
+                <span class="badge warn">@_flagged.Count</span>
+            }
+        </button>
     }
 </div>
 
-<h2 style="margin-top:1.5rem">Mensagens sinalizadas</h2>
-@if (_flagged.Count == 0)
-{
-    <div class="card muted">Nenhuma mensagem foi sinalizada.</div>
-}
-else
+@if (_tab == "Posts")
 {
     <div class="stack">
-        @foreach (var message in _flagged)
+        @if (_posts.Count == 0)
+        {
+            <div class="card muted">Nenhum post ainda.</div>
+        }
+        @foreach (var post in _posts)
         {
             <div class="card row between">
                 <div>
-                    <div class="small muted">@message.SenderName · @ShortDate(message.SentAt)</div>
-                    <div>@message.Body</div>
+                    <a href="@($"/posts/{post.Id}")">@post.Title</a>
+                    <div class="small muted">
+                        @post.AuthorName · @ShortDate(post.LastUpdateDate) ·
+                        <span class="badge">@(post.Classroom ?? "Mural geral")</span>
+                        @if (post.MediaCount > 0)
+                        {
+                            <span class="badge">@post.MediaCount mídia(s)</span>
+                        }
+                        @if (post.Status == ModerationStatus.Hidden)
+                        {
+                            <span class="badge warn">Escondido</span>
+                        }
+                    </div>
                 </div>
-                <button class="btn ghost small" type="button" @onclick="() => ResolveAsync(message)">
-                    Marcar como resolvida
-                </button>
+                <div class="row">
+                    <a class="btn ghost small" href="@($"/posts/{post.Id}")">Abrir / editar</a>
+                    <button class="btn ghost small" type="button" @onclick="() => TogglePostAsync(post)">
+                        @(post.Status == ModerationStatus.Hidden ? "Republicar" : "Esconder")
+                    </button>
+                    <button class="btn danger small" type="button" @onclick="() => DeletePostAsync(post)">Apagar</button>
+                </div>
             </div>
         }
     </div>
 }
+else if (_tab == "Sinalizadas")
+{
+    @if (_flagged.Count == 0)
+    {
+        <div class="card muted">Nenhuma mensagem foi sinalizada.</div>
+    }
+    else
+    {
+        <div class="stack">
+            @foreach (var message in _flagged)
+            {
+                <div class="card row between">
+                    <div>
+                        <div class="small muted">@message.SenderName · @ShortDate(message.SentAt)</div>
+                        <div>@message.Body</div>
+                        @if (message.MediaUrl != null)
+                        {
+                            <img class="media" src="@message.MediaUrl" alt="" style="max-height:120px;border-radius:8px;margin-top:.3rem" />
+                        }
+                    </div>
+                    <div class="row">
+                        <button class="btn ghost small" type="button" @onclick="() => OpenConversationAsync(message.ConversationId)">Ver conversa</button>
+                        <button class="btn ghost small" type="button" @onclick="() => ResolveAsync(message)">Resolvida</button>
+                        <button class="btn danger small" type="button" @onclick="() => HideMessageAsync(message.Id)">Esconder</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+else
+{
+    <div class="chat">
+        <div class="card">
+            <h2>Todas as conversas</h2>
+            <p class="small muted">Você enxerga qualquer conversa entre alunos. Use com cuidado: é para resolver problemas, não para vigiar.</p>
+
+            @if (_conversations.Count == 0)
+            {
+                <p class="small muted">Nenhuma conversa ainda.</p>
+            }
+
+            <div class="chat-list">
+                @foreach (var conversation in _conversations)
+                {
+                    <button class="chat-entry @(conversation.Id == _openId ? "active" : "")" type="button"
+                            @onclick="() => OpenConversationAsync(conversation.Id)">
+                        <span style="flex:1">
+                            <span class="small">@string.Join(" ↔ ", conversation.Participants)</span><br />
+                            <span class="small muted">@Preview(conversation.LastMessage) · @RelativeDate(conversation.LastMessageAt)</span>
+                        </span>
+                        @if (conversation.Flagged > 0)
+                        {
+                            <span class="badge warn">@conversation.Flagged</span>
+                        }
+                    </button>
+                }
+            </div>
+        </div>
+
+        <div class="card">
+            @if (_openId == 0)
+            {
+                <p class="muted">Escolha uma conversa para ler.</p>
+            }
+            else
+            {
+                <div class="chat-thread">
+                    <h2>@_openTitle</h2>
+                    <div class="chat-messages">
+                        @foreach (var message in _thread)
+                        {
+                            <div class="bubble @(message.Status == ModerationStatus.Hidden ? "hidden" : "") @(message.IsFlagged ? "flagged" : "")">
+                                <div class="small muted">@message.SenderName</div>
+                                @if (!string.IsNullOrWhiteSpace(message.Body))
+                                {
+                                    <div style="white-space:pre-wrap">@message.Body</div>
+                                }
+                                @if (message.MediaUrl != null)
+                                {
+                                    <img class="media" src="@message.MediaUrl" alt="" loading="lazy" onerror="this.style.display='none'" />
+                                }
+                                <time>@ShortDate(message.SentAt)</time>
+                                <div class="bubble-actions">
+                                    @if (message.Status == ModerationStatus.Hidden)
+                                    {
+                                        <button class="link-btn" type="button" @onclick="() => SetStatusAsync(message, ModerationStatus.Published)">Liberar</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="link-btn" type="button" @onclick="() => SetStatusAsync(message, ModerationStatus.Hidden)">Esconder</button>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
 
 @code {
+    private static readonly string[] Tabs = { "Posts", "Sinalizadas", "Conversas" };
+
+    private string _tab = "Posts";
     private List<ListPostsViewModel> _posts = new();
     private List<DirectMessageViewModel> _flagged = new();
+    private List<ConversationOverviewViewModel> _conversations = new();
+    private List<DirectMessageViewModel> _thread = new();
+    private int _openId;
+    private string? _openTitle;
 
     protected override async Task OnReadyAsync() => await LoadAsync();
 
     private async Task LoadAsync()
     {
         _posts = await Scope.UseAsync<PostService, List<ListPostsViewModel>>(
-            service => service.GetFeedAsync(UserId, pageSize: 30));
+            service => service.GetFeedAsync(UserId, pageSize: 50));
 
         _flagged = await Scope.RunAsync(async sp =>
             await sp.GetRequiredService<LinguaDataContext>()
@@ -82,12 +195,16 @@ else
                     Id = x.Id,
                     ConversationId = x.ConversationId,
                     Body = x.Body,
+                    MediaUrl = x.MediaUrl,
                     SentAt = x.SentAt,
                     SenderId = x.SenderId,
                     SenderName = x.Sender.Name,
                     IsFlagged = x.IsFlagged
                 })
                 .ToListAsync());
+
+        _conversations = await Scope.UseAsync<ConversationService, List<ConversationOverviewViewModel>>(
+            service => service.AllConversationsAsync());
     }
 
     private async Task TogglePostAsync(ListPostsViewModel post)
@@ -98,6 +215,15 @@ else
 
         await Scope.UseAsync<PostService>(service => service.SetPostStatusAsync(post.Id, status));
         post.Status = status;
+    }
+
+    private async Task DeletePostAsync(ListPostsViewModel post)
+    {
+        if (!await JS.InvokeAsync<bool>("lingua.confirm", $"Apagar \"{post.Title}\" de vez? Comentários e mídia somem junto."))
+            return;
+
+        await Scope.UseAsync<PostService>(service => service.DeleteAsync(UserId, post.Id));
+        _posts.Remove(post);
     }
 
     private async Task ResolveAsync(DirectMessageViewModel model)
@@ -116,4 +242,41 @@ else
 
         _flagged.Remove(model);
     }
+
+    private async Task HideMessageAsync(int messageId)
+    {
+        await Scope.UseAsync<ConversationService>(
+            service => service.SetMessageStatusAsync(messageId, ModerationStatus.Hidden));
+
+        await LoadAsync();
+
+        if (_openId != 0)
+            await OpenConversationAsync(_openId);
+    }
+
+    private async Task SetStatusAsync(DirectMessageViewModel message, ModerationStatus status)
+    {
+        await Scope.UseAsync<ConversationService>(
+            service => service.SetMessageStatusAsync(message.Id, status));
+
+        message.Status = status;
+        message.IsFlagged = false;
+    }
+
+    private async Task OpenConversationAsync(int conversationId)
+    {
+        _tab = "Conversas";
+        _openId = conversationId;
+
+        var overview = _conversations.FirstOrDefault(x => x.Id == conversationId);
+        _openTitle = overview == null ? "Conversa" : string.Join(" ↔ ", overview.Participants);
+
+        _thread = await Scope.UseAsync<ConversationService, List<DirectMessageViewModel>?>(
+            service => service.MessagesAsync(conversationId, UserId)) ?? new();
+    }
+
+    private static string Preview(string? body)
+        => string.IsNullOrWhiteSpace(body)
+            ? "GIF"
+            : body.Length <= 40 ? body : body[..40] + "...";
 }

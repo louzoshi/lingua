@@ -1,0 +1,42 @@
+@inject IJSRuntime JS
+
+<span style="position:relative">
+    <button class="btn ghost small" type="button" title="Emoji" @onclick="() => _open = !_open">😊</button>
+
+    @if (_open)
+    {
+        <div class="picker">
+            <div class="emoji-grid">
+                @foreach (var emoji in Emojis)
+                {
+                    <button type="button" @onclick="() => PickAsync(emoji)">@emoji</button>
+                }
+            </div>
+        </div>
+    }
+</span>
+
+@code {
+    /// <summary>Id do input ou textarea que recebe o emoji na posição do cursor.</summary>
+    [Parameter, EditorRequired] public string TargetId { get; set; } = string.Empty;
+
+    private bool _open;
+
+    private static readonly string[] Emojis =
+    {
+        "😀","😃","😄","😁","😆","😅","😂","🤣","😊","😇","🙂","🙃","😉","😍","🥰","😘",
+        "😋","😜","🤪","🤔","🤗","🤭","🤫","😐","😏","😒","🙄","😬","😌","😔","😴","🤒",
+        "🥳","😎","🤓","🧐","😕","😟","🙁","😮","😯","😲","😳","🥺","😢","😭","😱","😤",
+        "😡","🤯","😈","💀","👻","🤖","🎃","😺","👋","🤚","✋","👌","🤌","✌️","🤞","🤟",
+        "🤘","👍","👎","👊","✊","👏","🙌","🤝","🙏","💪","❤️","🧡","💛","💚","💙","💜",
+        "🖤","🤍","💔","💯","🔥","✨","⭐","🌟","💫","🎉","🎊","🎈","🎁","🏆","🥇","🎯",
+        "📚","📖","✏️","📝","🎓","🧠","💡","🗣️","👂","👀","🇬🇧","🇺🇸","🇧🇷","☕","🍕","🍔",
+        "🌍","✈️","🏖️","🎬","🎵","🎶","🎧","⚽","🏀","🕹️","📱","💻","⏰","📅","✅","❌"
+    };
+
+    private async Task PickAsync(string emoji)
+    {
+        _open = false;
+        await JS.InvokeVoidAsync("lingua.insertAtCursor", TargetId, emoji);
+    }
+}

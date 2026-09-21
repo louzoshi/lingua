@@ -11,6 +11,9 @@ public class DirectMessage
     public int SenderId { get; set; }
     public User Sender { get; set; } = null!;
 
+    /// <summary>GIF ou imagem enviada junto com a mensagem, quando houver.</summary>
+    public string? MediaUrl { get; set; }
+
     public DateTime SentAt { get; set; } = DateTime.UtcNow;
     public ModerationStatus Status { get; set; } = ModerationStatus.Published;
 

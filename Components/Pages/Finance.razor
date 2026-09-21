@@ -1,0 +1,516 @@
+@page "/financeiro"
+@attribute [Authorize(Policy = Policies.Teacher)]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@inject ScopeRunner Scope
+@inject IJSRuntime JS
+
+<PageTitle>Financeiro · Lingua</PageTitle>
+
+<div class="page-head">
+    <h1>Financeiro</h1>
+    <p class="muted">Só você vê esta área: pacotes, o que cada aluno paga, contratos e mensalidades recebidas.</p>
+</div>
+
+@if (_message != null)
+{
+    <div class="alert">@_message</div>
+}
+@if (_error != null)
+{
+    <div class="alert error">@_error</div>
+}
+
+<div class="row" style="margin-bottom:1rem">
+    @foreach (var tab in Tabs)
+    {
+        <button class="btn @(_tab == tab ? "" : "ghost") small" type="button" @onclick="() => _tab = tab">@tab</button>
+    }
+</div>
+
+@if (_tab == "Visão geral")
+{
+    <div class="card">
+        <h2>@MonthName(DateTime.Today)</h2>
+        <div class="stats">
+            <div class="stat"><b>@_summary.StudentsActive</b><span class="small muted">alunos com acesso (@_summary.StudentsRegistered cadastrados)</span></div>
+            <div class="stat"><b>@_summary.PlansActive</b><span class="small muted">planos ativos @(_summary.PlansPaused > 0 ? $"· {_summary.PlansPaused} pausado(s)" : "")</span></div>
+            <div class="stat @(_summary.StudentsWithoutPlan > 0 ? "warn" : "")"><b>@_summary.StudentsWithoutPlan</b><span class="small muted">alunos ativos sem plano</span></div>
+            <div class="stat"><b class="money">@Money(_summary.ExpectedMonthly)</b><span class="small muted">previsto por mês</span></div>
+            <div class="stat"><b class="money">@Money(_summary.ReceivedThisMonth)</b><span class="small muted">recebido este mês</span></div>
+            <div class="stat @(_summary.PendingThisMonth > 0 ? "warn" : "")"><b>@_summary.PaidThisMonth / @_summary.PlansActive</b><span class="small muted">mensalidades pagas</span></div>
+            <div class="stat @(_summary.ContractsMissing > 0 ? "danger" : "")"><b>@_summary.ContractsSigned / @(_summary.ContractsSigned + _summary.ContractsMissing)</b><span class="small muted">contratos assinados</span></div>
+        </div>
+    </div>
+
+    @if (_plans.Any(x => x.Status == PlanStatus.Active && !x.PaidThisMonth))
+    {
+        <div class="card" style="margin-top:1rem">
+            <h2>Ainda não pagaram este mês</h2>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead><tr><th>Aluno</th><th>Pacote</th><th>Valor</th><th>Vence dia</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var plan in _plans.Where(x => x.Status == PlanStatus.Active && !x.PaidThisMonth))
+                        {
+                            <tr>
+                                <td>@plan.StudentName</td>
+                                <td class="muted">@(plan.PackageName ?? "—")</td>
+                                <td class="money">@Money(plan.MonthlyValue)</td>
+                                <td>@plan.DueDay</td>
+                                <td><button class="btn ghost small" type="button" @onclick="() => QuickPay(plan)">Registrar pagamento</button></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+else if (_tab == "Pacotes")
+{
+    <div class="card">
+        <h2>Novo pacote</h2>
+        <EditForm Model="_package" OnValidSubmit="CreatePackageAsync" FormName="new-package">
+            <DataAnnotationsValidator />
+            <div class="fields-2">
+                <div class="field">
+                    <label>Nome</label>
+                    <InputText @bind-Value="_package.Name" placeholder="Conversação 2x/semana" />
+                    <ValidationMessage For="() => _package.Name" />
+                </div>
+                <div class="field">
+                    <label>Preço de tabela (R$/mês)</label>
+                    <InputNumber @bind-Value="_package.MonthlyPrice" step="0.01" />
+                    <ValidationMessage For="() => _package.MonthlyPrice" />
+                </div>
+                <div class="field">
+                    <label>Aulas por semana</label>
+                    <InputNumber @bind-Value="_package.LessonsPerWeek" />
+                    <ValidationMessage For="() => _package.LessonsPerWeek" />
+                </div>
+            </div>
+            <div class="field">
+                <label>Descrição</label>
+                <InputText @bind-Value="_package.Description" placeholder="O que está incluso" />
+            </div>
+            <button class="btn" type="submit">Criar pacote</button>
+        </EditForm>
+    </div>
+
+    <div class="grid" style="margin-top:1rem">
+        @foreach (var package in _packages)
+        {
+            <div class="card" style="@(package.IsActive ? "" : "opacity:.6")">
+                <div class="row between">
+                    <h3>@package.Name</h3>
+                    <b class="money">@Money(package.MonthlyPrice)</b>
+                </div>
+                <p class="small muted">@package.LessonsPerWeek aula(s)/semana · @_plans.Count(x => x.PackageName == package.Name && x.Status == PlanStatus.Active) aluno(s)</p>
+                @if (!string.IsNullOrWhiteSpace(package.Description))
+                {
+                    <p class="small">@package.Description</p>
+                }
+                <button class="btn ghost small" type="button" @onclick="() => TogglePackageAsync(package)">
+                    @(package.IsActive ? "Desativar" : "Reativar")
+                </button>
+            </div>
+        }
+    </div>
+}
+else if (_tab == "Alunos e contratos")
+{
+    <div class="card">
+        <h2>@(_plan.Id is null ? "Novo plano" : "Editar plano")</h2>
+        <EditForm Model="_plan" OnValidSubmit="SavePlanAsync" FormName="plan">
+            <DataAnnotationsValidator />
+            <div class="fields-2">
+                <div class="field">
+                    <label>Aluno</label>
+                    <InputSelect @bind-Value="_plan.StudentId" disabled="@(_plan.Id is not null)">
+                        <option value="0">Selecione</option>
+                        @foreach (var student in _students)
+                        {
+                            <option value="@student.Id">@student.Name (@student.Email)</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="() => _plan.StudentId" />
+                </div>
+                <div class="field">
+                    <label>Pacote</label>
+                    <InputSelect @bind-Value="_plan.PackageId" @oninput="OnPackageChanged">
+                        <option value="">Sem pacote (valor avulso)</option>
+                        @foreach (var package in _packages.Where(x => x.IsActive || x.Id == _plan.PackageId))
+                        {
+                            <option value="@package.Id">@package.Name · @Money(package.MonthlyPrice)</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="field">
+                    <label>Valor cobrado (R$/mês)</label>
+                    <InputNumber @bind-Value="_plan.MonthlyValue" step="0.01" />
+                    <ValidationMessage For="() => _plan.MonthlyValue" />
+                </div>
+                <div class="field">
+                    <label>Dia do vencimento</label>
+                    <InputNumber @bind-Value="_plan.DueDay" />
+                    <ValidationMessage For="() => _plan.DueDay" />
+                </div>
+                <div class="field">
+                    <label>Início</label>
+                    <InputDate @bind-Value="_plan.StartedAt" />
+                </div>
+                <div class="field">
+                    <label>Situação</label>
+                    <InputSelect @bind-Value="_plan.Status">
+                        <option value="@PlanStatus.Active">Ativo</option>
+                        <option value="@PlanStatus.Paused">Pausado</option>
+                        <option value="@PlanStatus.Ended">Encerrado</option>
+                    </InputSelect>
+                </div>
+                <div class="field">
+                    <label>Contrato assinado em</label>
+                    <InputDate @bind-Value="_plan.ContractSignedAt" />
+                </div>
+            </div>
+            <div class="field">
+                <label>Observações</label>
+                <InputTextArea @bind-Value="_plan.Notes" placeholder="Desconto combinado, forma de pagamento, etc." />
+            </div>
+            <div class="row">
+                <button class="btn" type="submit">@(_plan.Id is null ? "Criar plano" : "Salvar")</button>
+                @if (_plan.Id is not null)
+                {
+                    <button class="btn ghost" type="button" @onclick="() => _plan = new EditorPlanViewModel()">Cancelar</button>
+                }
+            </div>
+        </EditForm>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+        <h2>Planos</h2>
+        @if (_plans.Count == 0)
+        {
+            <p class="muted">Nenhum plano cadastrado. Crie o primeiro acima.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Aluno</th>
+                            <th>Pacote</th>
+                            <th>Mensalidade</th>
+                            <th>Vence</th>
+                            <th>Situação</th>
+                            <th>Este mês</th>
+                            <th>Contrato</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var plan in _plans)
+                        {
+                            <tr class="@(plan.Status == PlanStatus.Ended ? "inactive" : "")">
+                                <td>
+                                    <div class="row" style="gap:.5rem;flex-wrap:nowrap">
+                                        <AvatarView Image="@plan.StudentImage" Name="@plan.StudentName" Size="small" />
+                                        <div>
+                                            @plan.StudentName
+                                            @if (!plan.StudentActive)
+                                            {
+                                                <span class="badge danger">conta desativada</span>
+                                            }
+                                            <div class="small muted">desde @plan.StartedAt.ToString("MM/yyyy")</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="muted">@(plan.PackageName ?? "Avulso")</td>
+                                <td class="money">@Money(plan.MonthlyValue)</td>
+                                <td>dia @plan.DueDay</td>
+                                <td>
+                                    @switch (plan.Status)
+                                    {
+                                        case PlanStatus.Active: <span class="badge ok">Ativo</span>; break;
+                                        case PlanStatus.Paused: <span class="badge warn">Pausado</span>; break;
+                                        default: <span class="badge">Encerrado</span>; break;
+                                    }
+                                </td>
+                                <td>
+                                    @if (plan.Status != PlanStatus.Active)
+                                    {
+                                        <span class="muted">—</span>
+                                    }
+                                    else if (plan.PaidThisMonth)
+                                    {
+                                        <span class="badge ok">Pago</span>
+                                    }
+                                    else
+                                    {
+                                        <button class="link-btn" type="button" @onclick="() => QuickPay(plan)">Registrar</button>
+                                    }
+                                </td>
+                                <td>
+                                    @if (plan.HasContract)
+                                    {
+                                        <a class="btn ghost small" href="@($"/financeiro/contratos/{plan.Id}")" target="_blank" title="@plan.ContractOriginalName">📄 Abrir</a>
+                                        <div class="small muted">@(plan.ContractSignedAt is DateTime signed ? $"assinado {signed:dd/MM/yyyy}" : "")</div>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge danger">Sem contrato</span>
+                                    }
+                                    <label class="btn ghost small file-btn" style="margin-top:.3rem" title="Enviar PDF do contrato">
+                                        @(plan.HasContract ? "Substituir" : "Enviar PDF")
+                                        <InputFile OnChange="args => UploadContractAsync(plan, args)" accept="application/pdf" />
+                                    </label>
+                                </td>
+                                <td>
+                                    <div class="row" style="gap:.3rem;flex-wrap:nowrap;justify-content:flex-end">
+                                        <button class="btn ghost small" type="button" @onclick="() => EditPlanAsync(plan)">Editar</button>
+                                        @if (plan.HasContract)
+                                        {
+                                            <button class="btn danger small" type="button" @onclick="() => RemoveContractAsync(plan)">Tirar PDF</button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+else
+{
+    <div class="card">
+        <h2>Registrar pagamento</h2>
+        <EditForm Model="_payment" OnValidSubmit="RegisterPaymentAsync" FormName="payment">
+            <DataAnnotationsValidator />
+            <div class="fields-2">
+                <div class="field">
+                    <label>Plano</label>
+                    <InputSelect @bind-Value="_payment.PlanId" @oninput="OnPaymentPlanChanged">
+                        <option value="0">Selecione</option>
+                        @foreach (var plan in _plans.Where(x => x.Status != PlanStatus.Ended))
+                        {
+                            <option value="@plan.Id">@plan.StudentName · @Money(plan.MonthlyValue)</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="() => _payment.PlanId" />
+                </div>
+                <div class="field">
+                    <label>Mês de referência</label>
+                    <InputDate Type="InputDateType.Month" @bind-Value="_payment.ReferenceMonth" />
+                </div>
+                <div class="field">
+                    <label>Valor recebido (R$)</label>
+                    <InputNumber @bind-Value="_payment.Amount" step="0.01" />
+                    <ValidationMessage For="() => _payment.Amount" />
+                </div>
+                <div class="field">
+                    <label>Pago em</label>
+                    <InputDate @bind-Value="_payment.PaidAt" />
+                </div>
+                <div class="field">
+                    <label>Forma</label>
+                    <InputText @bind-Value="_payment.Method" placeholder="Pix, cartão, dinheiro..." />
+                </div>
+                <div class="field">
+                    <label>Observação</label>
+                    <InputText @bind-Value="_payment.Note" />
+                </div>
+            </div>
+            <button class="btn" type="submit">Registrar</button>
+        </EditForm>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+        <h2>Últimos recebimentos</h2>
+        @if (_payments.Count == 0)
+        {
+            <p class="muted">Nenhum pagamento registrado.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead><tr><th>Aluno</th><th>Referência</th><th>Valor</th><th>Pago em</th><th>Forma</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var payment in _payments)
+                        {
+                            <tr>
+                                <td>@payment.StudentName</td>
+                                <td>@MonthName(payment.ReferenceMonth)</td>
+                                <td class="money">@Money(payment.Amount)</td>
+                                <td>@payment.PaidAt.ToLocalTime().ToString("dd/MM/yyyy")</td>
+                                <td class="muted">@(payment.Method ?? "—") @(string.IsNullOrWhiteSpace(payment.Note) ? "" : $"· {payment.Note}")</td>
+                                <td><button class="link-btn" type="button" @onclick="() => DeletePaymentAsync(payment)">apagar</button></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private static readonly string[] Tabs = { "Visão geral", "Pacotes", "Alunos e contratos", "Pagamentos" };
+    private static readonly CultureInfo Culture = CultureInfo.GetCultureInfo("pt-BR");
+
+    private string _tab = "Visão geral";
+    private string? _message;
+    private string? _error;
+
+    private FinanceSummaryViewModel _summary = new();
+    private List<Package> _packages = new();
+    private List<PlanOverviewViewModel> _plans = new();
+    private List<PaymentViewModel> _payments = new();
+    private List<User> _students = new();
+
+    private EditorPackageViewModel _package = new();
+    private EditorPlanViewModel _plan = new();
+    private EditorPaymentViewModel _payment = new();
+
+    protected override async Task OnReadyAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _summary = await Scope.UseAsync<FinanceService, FinanceSummaryViewModel>(s => s.SummaryAsync());
+        _packages = await Scope.UseAsync<FinanceService, List<Package>>(s => s.PackagesAsync(includeInactive: true));
+        _plans = await Scope.UseAsync<FinanceService, List<PlanOverviewViewModel>>(s => s.PlansAsync());
+        _payments = await Scope.UseAsync<FinanceService, List<PaymentViewModel>>(s => s.PaymentsAsync());
+        _students = await Scope.UseAsync<ClassroomService, List<User>>(s => s.AllStudentsAsync());
+    }
+
+    private static string Money(decimal value) => value.ToString("C", Culture);
+    private static string MonthName(DateTime value) => Culture.TextInfo.ToTitleCase(value.ToString("MMMM 'de' yyyy", Culture));
+
+    private async Task CreatePackageAsync()
+    {
+        Reset();
+        var model = _package;
+        await Scope.UseAsync<FinanceService>(s => s.CreatePackageAsync(model));
+        _message = $"Pacote \"{model.Name}\" criado.";
+        _package = new EditorPackageViewModel();
+        await LoadAsync();
+    }
+
+    private async Task TogglePackageAsync(Package package)
+    {
+        Reset();
+        await Scope.UseAsync<FinanceService>(s => s.SetPackageActiveAsync(package.Id, !package.IsActive));
+        await LoadAsync();
+    }
+
+    private void OnPackageChanged(ChangeEventArgs args)
+    {
+        // Escolher um pacote sugere o preço de tabela; a professora ajusta se houver desconto.
+        if (int.TryParse(args.Value?.ToString(), out var id) && _packages.FirstOrDefault(x => x.Id == id) is { } package)
+            _plan.MonthlyValue = package.MonthlyPrice;
+    }
+
+    private void OnPaymentPlanChanged(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), out var id) && _plans.FirstOrDefault(x => x.Id == id) is { } plan)
+            _payment.Amount = plan.MonthlyValue;
+    }
+
+    private async Task SavePlanAsync()
+    {
+        Reset();
+        var model = _plan;
+
+        var (_, error) = await Scope.UseAsync<FinanceService, (StudentPlan?, string?)>(s => s.SavePlanAsync(model));
+        if (error != null)
+        {
+            _error = error;
+            return;
+        }
+
+        _message = model.Id is null ? "Plano criado." : "Plano atualizado.";
+        _plan = new EditorPlanViewModel();
+        await LoadAsync();
+    }
+
+    private async Task EditPlanAsync(PlanOverviewViewModel plan)
+    {
+        Reset();
+        _plan = await Scope.UseAsync<FinanceService, EditorPlanViewModel?>(s => s.GetPlanForEditAsync(plan.Id))
+                ?? new EditorPlanViewModel();
+    }
+
+    private async Task UploadContractAsync(PlanOverviewViewModel plan, InputFileChangeEventArgs args)
+    {
+        Reset();
+        var file = args.File;
+
+        if (file.Size > MediaStorage.MaxContractBytes)
+        {
+            _error = "O PDF passa de 20 MB.";
+            return;
+        }
+
+        await using var stream = file.OpenReadStream(MediaStorage.MaxContractBytes);
+        var content = stream;
+
+        _error = await Scope.UseAsync<FinanceService, string?>(
+            s => s.AttachContractAsync(plan.Id, content, file.ContentType, file.Name));
+
+        if (_error == null)
+            _message = $"Contrato de {plan.StudentName} guardado.";
+
+        await LoadAsync();
+    }
+
+    private async Task RemoveContractAsync(PlanOverviewViewModel plan)
+    {
+        Reset();
+
+        if (!await JS.InvokeAsync<bool>("lingua.confirm", $"Remover o PDF do contrato de {plan.StudentName}?"))
+            return;
+
+        await Scope.UseAsync<FinanceService>(s => s.RemoveContractAsync(plan.Id));
+        await LoadAsync();
+    }
+
+    private void QuickPay(PlanOverviewViewModel plan)
+    {
+        _tab = "Pagamentos";
+        _payment = new EditorPaymentViewModel { PlanId = plan.Id, Amount = plan.MonthlyValue };
+    }
+
+    private async Task RegisterPaymentAsync()
+    {
+        Reset();
+        var model = _payment;
+
+        _error = await Scope.UseAsync<FinanceService, string?>(s => s.RegisterPaymentAsync(model));
+        if (_error != null)
+            return;
+
+        _message = "Pagamento registrado.";
+        _payment = new EditorPaymentViewModel();
+        await LoadAsync();
+    }
+
+    private async Task DeletePaymentAsync(PaymentViewModel payment)
+    {
+        Reset();
+
+        if (!await JS.InvokeAsync<bool>("lingua.confirm", $"Apagar o pagamento de {payment.StudentName} ({MonthName(payment.ReferenceMonth)})?"))
+            return;
+
+        await Scope.UseAsync<FinanceService>(s => s.DeletePaymentAsync(payment.Id));
+        await LoadAsync();
+    }
+
+    private void Reset()
+    {
+        _message = null;
+        _error = null;
+    }
+}

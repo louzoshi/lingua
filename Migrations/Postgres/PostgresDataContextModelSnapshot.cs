@@ -169,6 +169,16 @@ namespace Lingua.Migrations.Postgres
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("EditedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("MediaUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int?>("ParentId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("PostId")
                         .HasColumnType("integer");
 
@@ -178,6 +188,8 @@ namespace Lingua.Migrations.Postgres
                     b.HasKey("Id");
 
                     b.HasIndex("AuthorId");
+
+                    b.HasIndex("ParentId");
 
                     b.HasIndex(new[] { "PostId", "CreatedAt" }, "IX_Comment_Post_Date");
 
@@ -250,6 +262,10 @@ namespace Lingua.Migrations.Postgres
 
                     b.Property<bool>("IsFlagged")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("MediaUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<int>("SenderId")
                         .HasColumnType("integer");
@@ -405,6 +421,141 @@ namespace Lingua.Migrations.Postgres
                     b.ToTable("LessonAttendance", (string)null);
                 });
 
+            modelBuilder.Entity("Lingua.Models.Notification", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DedupeKey")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ToEmail")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("ToName")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex(new[] { "DedupeKey" }, "IX_Notification_DedupeKey")
+                        .IsUnique();
+
+                    b.HasIndex(new[] { "Status", "NextAttemptAt" }, "IX_Notification_Status_NextAttempt");
+
+                    b.ToTable("Notification", (string)null);
+                });
+
+            modelBuilder.Entity("Lingua.Models.Package", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("LessonsPerWeek")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("MonthlyPrice")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Package", (string)null);
+                });
+
+            modelBuilder.Entity("Lingua.Models.Payment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<string>("Method")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("PaidAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PlanId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ReferenceMonth")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex(new[] { "PlanId", "ReferenceMonth" }, "IX_Payment_Plan_Month");
+
+                    b.ToTable("Payment", (string)null);
+                });
+
             modelBuilder.Entity("Lingua.Models.Post", b =>
                 {
                     b.Property<int>("Id")
@@ -467,6 +618,38 @@ namespace Lingua.Migrations.Postgres
                     b.ToTable("Post", (string)null);
                 });
 
+            modelBuilder.Entity("Lingua.Models.PostMedia", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PostId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex(new[] { "PostId", "Position" }, "IX_PostMedia_Post_Position");
+
+                    b.ToTable("PostMedia", (string)null);
+                });
+
             modelBuilder.Entity("Lingua.Models.Reaction", b =>
                 {
                     b.Property<int>("Id")
@@ -518,6 +701,60 @@ namespace Lingua.Migrations.Postgres
                         .IsUnique();
 
                     b.ToTable("Role", (string)null);
+                });
+
+            modelBuilder.Entity("Lingua.Models.StudentPlan", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ContractFile")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("ContractOriginalName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime?>("ContractSignedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DueDay")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("MonthlyValue")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int?>("PackageId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("StudentId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PackageId");
+
+                    b.HasIndex(new[] { "StudentId", "Status" }, "IX_StudentPlan_Student_Status");
+
+                    b.ToTable("StudentPlan", (string)null);
                 });
 
             modelBuilder.Entity("Lingua.Models.StudyResource", b =>
@@ -631,6 +868,9 @@ namespace Lingua.Migrations.Postgres
                         .HasColumnType("character varying(1000)");
 
                     b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeactivatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Email")
@@ -765,6 +1005,12 @@ namespace Lingua.Migrations.Postgres
                         .IsRequired()
                         .HasConstraintName("FK_Comment_Author");
 
+                    b.HasOne("Lingua.Models.Comment", "Parent")
+                        .WithMany("Replies")
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasConstraintName("FK_Comment_Parent");
+
                     b.HasOne("Lingua.Models.Post", "Post")
                         .WithMany("Comments")
                         .HasForeignKey("PostId")
@@ -773,6 +1019,8 @@ namespace Lingua.Migrations.Postgres
                         .HasConstraintName("FK_Comment_Post");
 
                     b.Navigation("Author");
+
+                    b.Navigation("Parent");
 
                     b.Navigation("Post");
                 });
@@ -893,6 +1141,18 @@ namespace Lingua.Migrations.Postgres
                     b.Navigation("Student");
                 });
 
+            modelBuilder.Entity("Lingua.Models.Payment", b =>
+                {
+                    b.HasOne("Lingua.Models.StudentPlan", "Plan")
+                        .WithMany("Payments")
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_Payment_Plan");
+
+                    b.Navigation("Plan");
+                });
+
             modelBuilder.Entity("Lingua.Models.Post", b =>
                 {
                     b.HasOne("Lingua.Models.User", "Author")
@@ -921,6 +1181,18 @@ namespace Lingua.Migrations.Postgres
                     b.Navigation("Topic");
                 });
 
+            modelBuilder.Entity("Lingua.Models.PostMedia", b =>
+                {
+                    b.HasOne("Lingua.Models.Post", "Post")
+                        .WithMany("Media")
+                        .HasForeignKey("PostId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_PostMedia_Post");
+
+                    b.Navigation("Post");
+                });
+
             modelBuilder.Entity("Lingua.Models.Reaction", b =>
                 {
                     b.HasOne("Lingua.Models.Post", "Post")
@@ -940,6 +1212,26 @@ namespace Lingua.Migrations.Postgres
                     b.Navigation("Post");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Lingua.Models.StudentPlan", b =>
+                {
+                    b.HasOne("Lingua.Models.Package", "Package")
+                        .WithMany("Plans")
+                        .HasForeignKey("PackageId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("FK_StudentPlan_Package");
+
+                    b.HasOne("Lingua.Models.User", "Student")
+                        .WithMany()
+                        .HasForeignKey("StudentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_StudentPlan_Student");
+
+                    b.Navigation("Package");
+
+                    b.Navigation("Student");
                 });
 
             modelBuilder.Entity("Lingua.Models.StudyResource", b =>
@@ -1012,6 +1304,11 @@ namespace Lingua.Migrations.Postgres
                     b.Navigation("Posts");
                 });
 
+            modelBuilder.Entity("Lingua.Models.Comment", b =>
+                {
+                    b.Navigation("Replies");
+                });
+
             modelBuilder.Entity("Lingua.Models.Conversation", b =>
                 {
                     b.Navigation("Messages");
@@ -1024,11 +1321,23 @@ namespace Lingua.Migrations.Postgres
                     b.Navigation("Attendances");
                 });
 
+            modelBuilder.Entity("Lingua.Models.Package", b =>
+                {
+                    b.Navigation("Plans");
+                });
+
             modelBuilder.Entity("Lingua.Models.Post", b =>
                 {
                     b.Navigation("Comments");
 
+                    b.Navigation("Media");
+
                     b.Navigation("Reactions");
+                });
+
+            modelBuilder.Entity("Lingua.Models.StudentPlan", b =>
+                {
+                    b.Navigation("Payments");
                 });
 
             modelBuilder.Entity("Lingua.Models.Topic", b =>

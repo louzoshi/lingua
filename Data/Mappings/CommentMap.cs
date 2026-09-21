@@ -13,6 +13,7 @@ public class CommentMap : IEntityTypeConfiguration<Comment>
         builder.Property(x => x.Id).ValueGeneratedOnAdd();
 
         builder.Property(x => x.Body).IsRequired().HasMaxLength(2000);
+        builder.Property(x => x.MediaUrl).HasMaxLength(500);
         builder.Property(x => x.Status).HasConversion<int>();
 
         builder.HasIndex(x => new { x.PostId, x.CreatedAt }, "IX_Comment_Post_Date");
@@ -22,6 +23,14 @@ public class CommentMap : IEntityTypeConfiguration<Comment>
             .WithMany(x => x.Comments)
             .HasForeignKey(x => x.PostId)
             .HasConstraintName("FK_Comment_Post")
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Resposta aponta para o comentário pai; apagar o pai leva as respostas junto.
+        builder
+            .HasOne(x => x.Parent)
+            .WithMany(x => x.Replies)
+            .HasForeignKey(x => x.ParentId)
+            .HasConstraintName("FK_Comment_Parent")
             .OnDelete(DeleteBehavior.Cascade);
 
         builder

@@ -13,6 +13,7 @@ public class DirectMessageMap : IEntityTypeConfiguration<DirectMessage>
         builder.Property(x => x.Id).ValueGeneratedOnAdd();
 
         builder.Property(x => x.Body).IsRequired().HasMaxLength(4000);
+        builder.Property(x => x.MediaUrl).HasMaxLength(500);
         builder.Property(x => x.Status).HasConversion<int>();
 
         builder.HasIndex(x => new { x.ConversationId, x.SentAt }, "IX_DirectMessage_Conversation_Date");

@@ -43,7 +43,7 @@ else
                 @foreach (var student in _students)
                 {
                     <a class="row" href="@($"/perfil/{student.Slug}")">
-                        <AvatarView Image="student.Image" Name="student.Name" Size="small" />
+                        <AvatarView Image="@student.Image" Name="@student.Name" Size="small" />
                         <span class="small">@student.Name</span>
                     </a>
                 }

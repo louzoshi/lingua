@@ -20,6 +20,10 @@
         {
             <div class="alert error">@_error</div>
         }
+        else if (Inativa == "1")
+        {
+            <div class="alert error">Esta conta foi desativada. Fale com a professora.</div>
+        }
 
         <EditForm Model="_model" OnValidSubmit="SignInAsync" FormName="login" method="post">
             <DataAnnotationsValidator />
@@ -45,11 +49,17 @@
     [CascadingParameter]
     private HttpContext? HttpContext { get; set; }
 
+    // O nome do campo no formulário vem desta propriedade, então ela precisa se chamar _model.
+#pragma warning disable BL0008
     [SupplyParameterFromForm]
     private LoginViewModel _model { get; set; } = new();
+#pragma warning restore BL0008
 
     [SupplyParameterFromQuery]
     private string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery(Name = "inativa")]
+    private string? Inativa { get; set; }
 
     private string? _error;
 

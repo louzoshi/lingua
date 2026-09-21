@@ -15,7 +15,18 @@
 </div>
 
 <div class="stack">
-    <PostComposer Classrooms="_classrooms" OnPublished="ReloadAsync" />
+    @if (!IsTeacher && !_loading && _classrooms.Count == 0)
+    {
+        <div class="card">
+            <h2>Você não está em nenhuma turma</h2>
+            <p class="muted">O mural, os materiais e os colegas aparecem quando a professora te matricular. Se acha que é um engano, mande uma mensagem para ela.</p>
+            <a class="btn ghost small" href="/mensagens">Falar com a professora</a>
+        </div>
+    }
+    else
+    {
+        <PostComposer Classrooms="_classrooms" OnPublished="ReloadAsync" />
+    }
 
     @if (_loading)
     {

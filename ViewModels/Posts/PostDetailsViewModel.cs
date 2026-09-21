@@ -24,9 +24,17 @@ public class PostDetailsViewModel
 
     public List<string> Tags { get; set; } = new();
     public List<CommentViewModel> Comments { get; set; } = new();
+    public List<MediaViewModel> Media { get; set; } = new();
 
     public int Reactions { get; set; }
     public bool ReactedByMe { get; set; }
     public bool CanEdit { get; set; }
     public bool CanModerate { get; set; }
+}
+
+public class MediaViewModel
+{
+    public int Id { get; set; }
+    public string Url { get; set; } = string.Empty;
+    public MediaKind Kind { get; set; }
 }

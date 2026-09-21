@@ -22,4 +22,13 @@ public class EditorPostViewModel
 
     /// <summary>Tags separadas por vírgula, criadas na hora se ainda não existirem.</summary>
     public string? Tags { get; set; }
+
+    /// <summary>Mídia já enviada para o servidor, na ordem em que deve aparecer.</summary>
+    public List<MediaItem> Media { get; set; } = new();
+
+    public class MediaItem
+    {
+        public string Url { get; set; } = string.Empty;
+        public Models.MediaKind Kind { get; set; }
+    }
 }
