@@ -1,0 +1,138 @@
+@using Microsoft.EntityFrameworkCore
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@inject ScopeRunner Scope
+
+<div class="card">
+    @if (!_open)
+    {
+        <button class="btn ghost" type="button" @onclick="() => _open = true">
+            Escrever um post@(FixedClassroomName is null ? "" : $" em {FixedClassroomName}")
+        </button>
+    }
+    else
+    {
+        @if (_error != null)
+        {
+            <div class="alert error">@_error</div>
+        }
+
+        <EditForm Model="_model" OnValidSubmit="PublishAsync" FormName="composer">
+            <DataAnnotationsValidator />
+
+            <div class="field">
+                <label for="title">Título</label>
+                <InputText id="title" @bind-Value="_model.Title" placeholder="What's on your mind?" />
+                <ValidationMessage For="() => _model.Title" />
+            </div>
+
+            <div class="field">
+                <label for="summary">Resumo</label>
+                <InputText id="summary" @bind-Value="_model.Summary" placeholder="Uma linha sobre o post" />
+                <ValidationMessage For="() => _model.Summary" />
+            </div>
+
+            <div class="field">
+                <label for="body">Texto</label>
+                <InputTextArea id="body" @bind-Value="_model.Body" />
+                <ValidationMessage For="() => _model.Body" />
+            </div>
+
+            <div class="fields-2">
+                @if (FixedClassroomId is null)
+                {
+                    <div class="field">
+                        <label for="classroom">Onde publicar</label>
+                        <InputSelect id="classroom" @bind-Value="_model.ClassroomId">
+                            <option value="">Mural geral (todos os alunos)</option>
+                            @foreach (var classroom in Classrooms)
+                            {
+                                <option value="@classroom.Id">@classroom.Name</option>
+                            }
+                        </InputSelect>
+                    </div>
+                }
+
+                <div class="field">
+                    <label for="topic">Assunto</label>
+                    <InputSelect id="topic" @bind-Value="_model.TopicId">
+                        <option value="">Sem assunto</option>
+                        @foreach (var topic in _topics)
+                        {
+                            <option value="@topic.Id">@topic.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+
+                <div class="field">
+                    <label for="tags">Tags</label>
+                    <InputText id="tags" @bind-Value="_model.Tags" placeholder="travel, past tense" />
+                </div>
+            </div>
+
+            <div class="row">
+                <button class="btn" type="submit" disabled="@_saving">Publicar</button>
+                <button class="btn ghost" type="button" @onclick="Close">Cancelar</button>
+            </div>
+        </EditForm>
+    }
+</div>
+
+@code {
+    [Parameter] public List<ListClassroomsViewModel> Classrooms { get; set; } = new();
+
+    /// <summary>Quando a caixa vive dentro do mural de uma turma, o destino já vem decidido.</summary>
+    [Parameter] public int? FixedClassroomId { get; set; }
+    [Parameter] public string? FixedClassroomName { get; set; }
+
+    [Parameter] public EventCallback OnPublished { get; set; }
+
+    /// <summary>Em uma página dedicada a escrever, o formulário já nasce aberto.</summary>
+    [Parameter] public bool StartOpen { get; set; }
+
+    private EditorPostViewModel _model = new();
+    private List<Topic> _topics = new();
+    private bool _open;
+    private bool _saving;
+    private string? _error;
+
+    protected override async Task OnReadyAsync()
+    {
+        _open = StartOpen;
+        _topics = await Scope.RunAsync(async sp =>
+            await sp.GetRequiredService<LinguaDataContext>()
+                .Topics
+                .AsNoTracking()
+                .OrderBy(x => x.Name)
+                .ToListAsync());
+    }
+
+    private async Task PublishAsync()
+    {
+        _saving = true;
+        _error = null;
+
+        _model.ClassroomId = FixedClassroomId ?? _model.ClassroomId;
+
+        var (post, error) = await Scope.UseAsync<PostService, (Post?, string?)>(
+            service => service.CreateAsync(UserId, _model));
+
+        _saving = false;
+
+        if (error != null)
+        {
+            _error = error;
+            return;
+        }
+
+        Close();
+        await OnPublished.InvokeAsync();
+    }
+
+    private void Close()
+    {
+        _model = new EditorPostViewModel();
+        _open = StartOpen;
+        _error = null;
+    }
+}

@@ -1,129 +1,155 @@
 using System.Text.RegularExpressions;
-using Blog.Data;
-using Blog.Extensions;
-using Blog.Models;
-using Blog.Services;
-using Blog.ViewModels;
-using Blog.ViewModels.Accounts;
+using Lingua.Data;
+using Lingua.Extensions;
+using Lingua.Models;
+using Lingua.Services;
+using Lingua.ViewModels;
+using Lingua.ViewModels.Accounts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SecureIdentity.Password;
 
-namespace Blog.Controllers;
+namespace Lingua.Controllers;
 
-[ApiController]
-public class AccountController : ControllerBase
+public class AccountController : ApiController
 {
-    [HttpPost("v1/accounts/")]
-    public async Task<IActionResult> Post(
+    private static readonly Regex Base64Prefix = new(@"^data:image\/[a-z]+;base64,", RegexOptions.Compiled);
+    private static readonly string[] AllowedRoles = { Role.Student, Role.Teacher };
+
+    /// <summary>Convida um aluno. Só professor cria conta: não há cadastro aberto na plataforma.</summary>
+    [HttpPost("v1/accounts")]
+    [Authorize(Policy = Policies.Teacher, AuthenticationSchemes = Policies.JwtScheme)]
+    public async Task<IActionResult> InviteAsync(
         [FromBody] RegisterViewModel model,
-        [FromServices] BlogDataContext context,
+        [FromQuery] string? role,
+        [FromServices] LinguaDataContext context,
         [FromServices] EmailService emailService)
     {
         if (!ModelState.IsValid)
-            return BadRequest(new ResultViewModel<string>(ModelState.GetErrors()));
+            return BadRequest(ResultViewModel<string>.Fail(ModelState.GetErrors()));
 
-        var user = new User
-        {
-            Name = model.Name,
-            Email = model.Email,
-            Slug = model.Email.Replace("@", "-").Replace(".", "-")
-        };
+        var roleSlug = string.IsNullOrWhiteSpace(role) ? Role.Student : role.ToLowerInvariant();
+        if (!AllowedRoles.Contains(roleSlug))
+            return BadRequest(ResultViewModel<string>.Fail("Perfil inválido"));
 
-        var password = PasswordGenerator.Generate(25);
-        user.PasswordHash = PasswordHasher.Hash(password);
+        var (user, password, error) = await AccountFactory.InviteStudentAsync(
+            context, emailService, model, roleSlug);
 
-        try
-        {
-            await context.Users.AddAsync(user);
-            await context.SaveChangesAsync();
-
-            emailService.Send(user.Name, user.Email, "Bem vindo ao blog!", $"Sua senha é {password}");
-            return Ok(new ResultViewModel<dynamic>(new
-            {
-                user = user.Email, password
-            }));
-        }
-        catch (DbUpdateException)
-        {
-            return StatusCode(400, new ResultViewModel<string>("05X99 - Este E-mail já está cadastrado"));
-        }
-        catch
-        {
-            return StatusCode(500, new ResultViewModel<string>("05X04 - Falha interna no servidor"));
-        }
+        return error != null
+            ? BadRequest(ResultViewModel<string>.Fail(error))
+            : Ok(ResultViewModel<dynamic>.Success(new { user = user!.Email, password }));
     }
 
     [HttpPost("v1/accounts/login")]
-    public async Task<IActionResult> Login(
+    [AllowAnonymous]
+    public async Task<IActionResult> LoginAsync(
         [FromBody] LoginViewModel model,
-        [FromServices] BlogDataContext context,
+        [FromServices] LinguaDataContext context,
         [FromServices] TokenService tokenService)
     {
         if (!ModelState.IsValid)
-            return BadRequest(new ResultViewModel<string>(ModelState.GetErrors()));
+            return BadRequest(ResultViewModel<string>.Fail(ModelState.GetErrors()));
 
         var user = await context
             .Users
-            .AsNoTracking()
             .Include(x => x.Roles)
-            .FirstOrDefaultAsync(x => x.Email == model.Email);
+            .FirstOrDefaultAsync(x => x.Email == model.Email.Trim().ToLower());
 
-        if (user == null)
-            return StatusCode(401, new ResultViewModel<string>("Usuário ou senha inválidos"));
+        if (user == null || !PasswordHasher.Verify(user.PasswordHash, model.Password))
+            return StatusCode(401, ResultViewModel<string>.Fail("Usuário ou senha inválidos"));
 
-        if (!PasswordHasher.Verify(user.PasswordHash, model.Password))
-            return StatusCode(401, new ResultViewModel<string>("Usuário ou senha inválidos"));
+        if (!user.IsActive)
+            return StatusCode(401, ResultViewModel<string>.Fail("Esta conta está desativada"));
 
-        try
-        {
-            var token = tokenService.GenerateToken(user);
-            return Ok(new ResultViewModel<string>(token, null));
-        }
-        catch
-        {
-            return StatusCode(500, new ResultViewModel<string>("05X04 - Falha interna no servidor"));
-        }
+        user.LastSeenAt = DateTime.UtcNow;
+        await context.SaveChangesAsync();
+
+        return Ok(ResultViewModel<string>.Success(tokenService.GenerateToken(user)));
     }
 
-    [Authorize]
-    [HttpPost("v1/accounts/upload-image")]
-    public async Task<IActionResult> UploadImage(
-        [FromBody] UploadImageViewModel model,
-        [FromServices] BlogDataContext context)
+    [HttpPut("v1/accounts/me")]
+    public async Task<IActionResult> UpdateProfileAsync(
+        [FromBody] UpdateProfileViewModel model,
+        [FromServices] LinguaDataContext context)
     {
-        var fileName = $"{Guid.NewGuid().ToString()}.jpg";
-        var data = new Regex(@"^data:image\/[a-z]+;base64,").Replace(model.Base64Image, "");
-        var bytes = Convert.FromBase64String(data);
+        if (!ModelState.IsValid)
+            return BadRequest(ResultViewModel<string>.Fail(ModelState.GetErrors()));
 
-        try
-        {
-            await System.IO.File.WriteAllBytesAsync($"wwwroot/images/{fileName}", bytes);
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new ResultViewModel<string>("05X04 - Falha interna no servidor"));
-        }
-
-        var user = await context
-            .Users
-            .FirstOrDefaultAsync(x => x.Email == User.Identity.Name);
-
+        var user = await context.Users.FirstOrDefaultAsync(x => x.Id == CurrentUserId);
         if (user == null)
-            return NotFound(new ResultViewModel<Category>("Usuário não encontrado"));
+            return NotFound(ResultViewModel<string>.Fail("Usuário não encontrado"));
 
-        user.Image = $"https://localhost:0000/images/{fileName}";
+        user.Name = model.Name.Trim();
+        user.Bio = model.Bio;
+        user.Location = model.Location;
+        user.Level = model.Level;
+
+        await context.SaveChangesAsync();
+
+        return Ok(ResultViewModel<string>.Success("Perfil atualizado"));
+    }
+
+    [HttpPut("v1/accounts/me/password")]
+    public async Task<IActionResult> ChangePasswordAsync(
+        [FromBody] ChangePasswordViewModel model,
+        [FromServices] LinguaDataContext context)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ResultViewModel<string>.Fail(ModelState.GetErrors()));
+
+        var user = await context.Users.FirstOrDefaultAsync(x => x.Id == CurrentUserId);
+        if (user == null)
+            return NotFound(ResultViewModel<string>.Fail("Usuário não encontrado"));
+
+        if (!PasswordHasher.Verify(user.PasswordHash, model.CurrentPassword))
+            return BadRequest(ResultViewModel<string>.Fail("Senha atual incorreta"));
+
+        user.PasswordHash = PasswordHasher.Hash(model.NewPassword);
+        await context.SaveChangesAsync();
+
+        return Ok(ResultViewModel<string>.Success("Senha alterada"));
+    }
+
+    [HttpPost("v1/accounts/me/image")]
+    public async Task<IActionResult> UploadImageAsync(
+        [FromBody] UploadImageViewModel model,
+        [FromServices] LinguaDataContext context,
+        [FromServices] IWebHostEnvironment environment)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ResultViewModel<string>.Fail(ModelState.GetErrors()));
+
+        var user = await context.Users.FirstOrDefaultAsync(x => x.Id == CurrentUserId);
+        if (user == null)
+            return NotFound(ResultViewModel<string>.Fail("Usuário não encontrado"));
+
+        byte[] bytes;
         try
         {
-            context.Users.Update(user);
-            await context.SaveChangesAsync();
+            bytes = Convert.FromBase64String(Base64Prefix.Replace(model.Base64Image, string.Empty));
         }
-        catch (Exception ex)
+        catch (FormatException)
         {
-            return StatusCode(500, new ResultViewModel<string>("05X04 - Falha interna no servidor"));
+            return BadRequest(ResultViewModel<string>.Fail("Imagem inválida"));
         }
 
-        return Ok(new ResultViewModel<string>("Imagem alterada com sucesso!", null));
+        var fileName = $"{Guid.NewGuid()}.jpg";
+        var folder = Path.Combine(environment.WebRootPath, "images");
+        Directory.CreateDirectory(folder);
+
+        try
+        {
+            await System.IO.File.WriteAllBytesAsync(Path.Combine(folder, fileName), bytes);
+        }
+        catch (IOException)
+        {
+            return ServerError("05X04");
+        }
+
+        user.Image = $"{Configuration.PublicUrl}/images/{fileName}";
+        await context.SaveChangesAsync();
+
+        return Ok(ResultViewModel<string>.Success(user.Image));
     }
 }

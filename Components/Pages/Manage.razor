@@ -1,0 +1,485 @@
+@page "/gerenciar"
+@attribute [Authorize(Policy = Policies.Teacher)]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@using Microsoft.EntityFrameworkCore
+@inject ScopeRunner Scope
+
+<PageTitle>Gerenciar · Lingua</PageTitle>
+
+<div class="page-head">
+    <h1>Gerenciar</h1>
+    <p class="muted">Turmas, alunos, aulas, materiais e trabalhos.</p>
+</div>
+
+@if (_message != null)
+{
+    <div class="alert">@_message</div>
+}
+@if (_error != null)
+{
+    <div class="alert error">@_error</div>
+}
+
+<div class="row" style="margin-bottom:1rem">
+    @foreach (var tab in Tabs)
+    {
+        <button class="btn @(_tab == tab ? "" : "ghost") small" type="button" @onclick="() => _tab = tab">
+            @tab
+        </button>
+    }
+</div>
+
+@if (_tab == "Turmas")
+{
+    <div class="card">
+        <h2>Nova turma</h2>
+        <EditForm Model="_classroom" OnValidSubmit="CreateClassroomAsync" FormName="new-classroom">
+            <DataAnnotationsValidator />
+            <div class="fields-2">
+                <div class="field">
+                    <label>Nome</label>
+                    <InputText @bind-Value="_classroom.Name" placeholder="Intermediate - Tuesday" />
+                    <ValidationMessage For="() => _classroom.Name" />
+                </div>
+                <div class="field">
+                    <label>Nível</label>
+                    <InputSelect @bind-Value="_classroom.Level">
+                        @foreach (var level in Enum.GetValues<EnglishLevel>())
+                        {
+                            <option value="@level">@level</option>
+                        }
+                    </InputSelect>
+                </div>
+            </div>
+            <div class="field">
+                <label>Descrição</label>
+                <InputText @bind-Value="_classroom.Description" />
+            </div>
+            <button class="btn" type="submit">Criar turma</button>
+        </EditForm>
+    </div>
+
+    <div class="grid" style="margin-top:1rem">
+        @foreach (var classroom in _classrooms)
+        {
+            <div class="card">
+                <div class="row between">
+                    <h3>@classroom.Name</h3>
+                    <span class="badge accent">@classroom.Level</span>
+                </div>
+                <p class="small muted">@classroom.Students aluno(s) · @classroom.Posts post(s)</p>
+                <a class="btn ghost small" href="@($"/turmas/{classroom.Id}")">Abrir mural</a>
+            </div>
+        }
+    </div>
+}
+else if (_tab == "Alunos")
+{
+    <div class="card">
+        <h2>Convidar aluno</h2>
+        <p class="small muted">A senha inicial vai por e-mail. Sem SMTP configurado, ela aparece aqui.</p>
+
+        <EditForm Model="_invite" OnValidSubmit="InviteAsync" FormName="invite">
+            <DataAnnotationsValidator />
+            <div class="fields-2">
+                <div class="field">
+                    <label>Nome</label>
+                    <InputText @bind-Value="_invite.Name" />
+                    <ValidationMessage For="() => _invite.Name" />
+                </div>
+                <div class="field">
+                    <label>E-mail</label>
+                    <InputText @bind-Value="_invite.Email" />
+                    <ValidationMessage For="() => _invite.Email" />
+                </div>
+                <div class="field">
+                    <label>Nível</label>
+                    <InputSelect @bind-Value="_invite.Level">
+                        @foreach (var level in Enum.GetValues<EnglishLevel>())
+                        {
+                            <option value="@level">@level</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="field">
+                    <label>Turma</label>
+                    <InputSelect @bind-Value="_invite.ClassroomId">
+                        <option value="">Sem turma por enquanto</option>
+                        @foreach (var classroom in _classrooms)
+                        {
+                            <option value="@classroom.Id">@classroom.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+            </div>
+            <button class="btn" type="submit">Convidar</button>
+        </EditForm>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+        <h2>Matricular aluno existente</h2>
+        <div class="fields-2">
+            <div class="field">
+                <label>Aluno</label>
+                <select @bind="_enrollStudentId">
+                    <option value="">Selecione</option>
+                    @foreach (var student in _students)
+                    {
+                        <option value="@student.Id">@student.Name (@student.Email)</option>
+                    }
+                </select>
+            </div>
+            <div class="field">
+                <label>Turma</label>
+                <select @bind="_enrollClassroomId">
+                    <option value="">Selecione</option>
+                    @foreach (var classroom in _classrooms)
+                    {
+                        <option value="@classroom.Id">@classroom.Name</option>
+                    }
+                </select>
+            </div>
+        </div>
+        <button class="btn" type="button" @onclick="EnrollAsync">Matricular</button>
+    </div>
+}
+else if (_tab == "Aulas")
+{
+    <div class="card">
+        <h2>Nova aula</h2>
+        <EditForm Model="_lesson" OnValidSubmit="CreateLessonAsync" FormName="new-lesson">
+            <DataAnnotationsValidator />
+            <div class="fields-2">
+                <div class="field">
+                    <label>Título</label>
+                    <InputText @bind-Value="_lesson.Title" />
+                    <ValidationMessage For="() => _lesson.Title" />
+                </div>
+                <div class="field">
+                    <label>Turma</label>
+                    <InputSelect @bind-Value="_lesson.ClassroomId">
+                        <option value="0">Selecione</option>
+                        @foreach (var classroom in _classrooms)
+                        {
+                            <option value="@classroom.Id">@classroom.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="field">
+                    <label>Data e hora</label>
+                    <InputDate Type="InputDateType.DateTimeLocal" @bind-Value="_lesson.ScheduledAt" />
+                </div>
+                <div class="field">
+                    <label>Duração (min)</label>
+                    <InputNumber @bind-Value="_lesson.DurationMinutes" />
+                </div>
+                <div class="field">
+                    <label>Link do encontro</label>
+                    <InputText @bind-Value="_lesson.MeetingUrl" placeholder="https://meet..." />
+                </div>
+                <div class="field">
+                    <label>Link da gravação</label>
+                    <InputText @bind-Value="_lesson.RecordingUrl" placeholder="https://..." />
+                </div>
+            </div>
+            <div class="field">
+                <label>Descrição</label>
+                <InputTextArea @bind-Value="_lesson.Description" />
+            </div>
+            <button class="btn" type="submit">Agendar aula</button>
+        </EditForm>
+    </div>
+}
+else if (_tab == "Materiais")
+{
+    <div class="card">
+        <h2>Novo material</h2>
+        <EditForm Model="_resource" OnValidSubmit="CreateResourceAsync" FormName="new-resource">
+            <DataAnnotationsValidator />
+            <div class="fields-2">
+                <div class="field">
+                    <label>Título</label>
+                    <InputText @bind-Value="_resource.Title" />
+                    <ValidationMessage For="() => _resource.Title" />
+                </div>
+                <div class="field">
+                    <label>Link</label>
+                    <InputText @bind-Value="_resource.Url" placeholder="https://..." />
+                    <ValidationMessage For="() => _resource.Url" />
+                </div>
+                <div class="field">
+                    <label>Tipo</label>
+                    <InputSelect @bind-Value="_resource.Kind">
+                        @foreach (var kind in Enum.GetValues<ResourceKind>())
+                        {
+                            <option value="@kind">@kind</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="field">
+                    <label>Nível</label>
+                    <InputSelect @bind-Value="_resource.Level">
+                        @foreach (var level in Enum.GetValues<EnglishLevel>())
+                        {
+                            <option value="@level">@level</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="field">
+                    <label>Turma</label>
+                    <InputSelect @bind-Value="_resource.ClassroomId">
+                        <option value="">Toda a escola</option>
+                        @foreach (var classroom in _classrooms)
+                        {
+                            <option value="@classroom.Id">@classroom.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+            </div>
+            <div class="field">
+                <label>Descrição</label>
+                <InputTextArea @bind-Value="_resource.Description" />
+            </div>
+            <button class="btn" type="submit">Publicar material</button>
+        </EditForm>
+    </div>
+}
+else
+{
+    <div class="card">
+        <h2>Novo trabalho</h2>
+        <EditForm Model="_assignment" OnValidSubmit="CreateAssignmentAsync" FormName="new-assignment">
+            <DataAnnotationsValidator />
+            <div class="fields-2">
+                <div class="field">
+                    <label>Título</label>
+                    <InputText @bind-Value="_assignment.Title" />
+                    <ValidationMessage For="() => _assignment.Title" />
+                </div>
+                <div class="field">
+                    <label>Turma</label>
+                    <InputSelect @bind-Value="_assignment.ClassroomId">
+                        <option value="0">Selecione</option>
+                        @foreach (var classroom in _classrooms)
+                        {
+                            <option value="@classroom.Id">@classroom.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="field">
+                    <label>Link do enunciado</label>
+                    <InputText @bind-Value="_assignment.Url" placeholder="https://..." />
+                </div>
+                <div class="field">
+                    <label>Prazo</label>
+                    <InputDate @bind-Value="_assignment.DueDate" />
+                </div>
+            </div>
+            <div class="field">
+                <label>Instruções</label>
+                <InputTextArea @bind-Value="_assignment.Instructions" />
+            </div>
+            <button class="btn" type="submit">Publicar trabalho</button>
+        </EditForm>
+    </div>
+}
+
+@code {
+    private static readonly string[] Tabs = { "Turmas", "Alunos", "Aulas", "Materiais", "Trabalhos" };
+
+    private string _tab = "Turmas";
+    private string? _message;
+    private string? _error;
+
+    private List<ListClassroomsViewModel> _classrooms = new();
+    private List<User> _students = new();
+
+    private EditorClassroomViewModel _classroom = new();
+    private RegisterViewModel _invite = new();
+    private EditorLessonViewModel _lesson = new();
+    private EditorStudyResourceViewModel _resource = new();
+    private EditorAssignmentViewModel _assignment = new();
+
+    private string _enrollStudentId = string.Empty;
+    private string _enrollClassroomId = string.Empty;
+
+    protected override async Task OnReadyAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _classrooms = await Scope.UseAsync<ClassroomService, List<ListClassroomsViewModel>>(
+            service => service.ForUserAsync(UserId));
+
+        _students = await Scope.UseAsync<ClassroomService, List<User>>(
+            service => service.AllStudentsAsync());
+    }
+
+    private async Task CreateClassroomAsync()
+    {
+        Reset();
+
+        var (classroom, error) = await Scope.UseAsync<ClassroomService, (Classroom?, string?)>(
+            service => service.CreateAsync(UserId, _classroom));
+
+        if (error != null)
+        {
+            _error = error;
+            return;
+        }
+
+        _message = $"Turma \"{classroom!.Name}\" criada.";
+        _classroom = new EditorClassroomViewModel();
+        await LoadAsync();
+    }
+
+    private async Task InviteAsync()
+    {
+        Reset();
+
+        var model = _invite;
+
+        var result = await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+            var email = sp.GetRequiredService<EmailService>();
+
+            return await AccountFactory.InviteStudentAsync(context, email, model);
+        });
+
+        if (result.Error != null)
+        {
+            _error = result.Error;
+            return;
+        }
+
+        _message = $"Aluno convidado. Senha inicial: {result.Password}";
+        _invite = new RegisterViewModel();
+        await LoadAsync();
+    }
+
+    private async Task EnrollAsync()
+    {
+        Reset();
+
+        if (!int.TryParse(_enrollStudentId, out var studentId) ||
+            !int.TryParse(_enrollClassroomId, out var classroomId))
+        {
+            _error = "Escolha o aluno e a turma.";
+            return;
+        }
+
+        var error = await Scope.UseAsync<ClassroomService, string?>(
+            service => service.EnrollAsync(classroomId, studentId));
+
+        if (error != null)
+        {
+            _error = error;
+            return;
+        }
+
+        _message = "Aluno matriculado.";
+        await LoadAsync();
+    }
+
+    private async Task CreateLessonAsync()
+    {
+        Reset();
+
+        if (_lesson.ClassroomId == 0)
+        {
+            _error = "Escolha a turma da aula.";
+            return;
+        }
+
+        var model = _lesson;
+
+        await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+
+            await context.Lessons.AddAsync(new Lesson
+            {
+                Title = model.Title.Trim(),
+                Description = model.Description,
+                ClassroomId = model.ClassroomId,
+                ScheduledAt = model.ScheduledAt,
+                DurationMinutes = model.DurationMinutes,
+                MeetingUrl = model.MeetingUrl,
+                RecordingUrl = model.RecordingUrl
+            });
+
+            await context.SaveChangesAsync();
+        });
+
+        _message = "Aula agendada.";
+        _lesson = new EditorLessonViewModel();
+    }
+
+    private async Task CreateResourceAsync()
+    {
+        Reset();
+
+        var model = _resource;
+        var userId = UserId;
+
+        await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+
+            await context.StudyResources.AddAsync(new StudyResource
+            {
+                Title = model.Title.Trim(),
+                Description = model.Description,
+                Url = model.Url,
+                Kind = model.Kind,
+                Level = model.Level,
+                ClassroomId = model.ClassroomId,
+                CreatedById = userId
+            });
+
+            await context.SaveChangesAsync();
+        });
+
+        _message = "Material publicado.";
+        _resource = new EditorStudyResourceViewModel();
+    }
+
+    private async Task CreateAssignmentAsync()
+    {
+        Reset();
+
+        if (_assignment.ClassroomId == 0)
+        {
+            _error = "Escolha a turma do trabalho.";
+            return;
+        }
+
+        var model = _assignment;
+
+        await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+
+            await context.Assignments.AddAsync(new Assignment
+            {
+                Title = model.Title.Trim(),
+                Instructions = model.Instructions,
+                Url = model.Url,
+                ClassroomId = model.ClassroomId,
+                DueDate = model.DueDate
+            });
+
+            await context.SaveChangesAsync();
+        });
+
+        _message = "Trabalho publicado.";
+        _assignment = new EditorAssignmentViewModel();
+    }
+
+    private void Reset()
+    {
+        _message = null;
+        _error = null;
+    }
+}

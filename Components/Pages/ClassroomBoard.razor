@@ -1,0 +1,103 @@
+@page "/turmas/{Id:int}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@inject ScopeRunner Scope
+
+<PageTitle>@(_classroom?.Name ?? "Turma") · Lingua</PageTitle>
+
+@if (_loading)
+{
+    <div class="card muted">Carregando...</div>
+}
+else if (_classroom == null)
+{
+    <div class="card">
+        <h1>Turma indisponível</h1>
+        <p class="muted">Você não participa desta turma.</p>
+    </div>
+}
+else
+{
+    <div class="page-head row between">
+        <div>
+            <h1>@_classroom.Name</h1>
+            <p class="muted">
+                @_classroom.Description
+                <span class="badge accent">@_classroom.Level</span>
+            </p>
+        </div>
+        <div class="row">
+            <a class="btn ghost" href="@($"/estudo?turma={Id}")">Aulas</a>
+            <a class="btn ghost" href="@($"/trabalhos?turma={Id}")">Trabalhos</a>
+            <a class="btn ghost" href="@($"/ranking?turma={Id}")">Ranking</a>
+        </div>
+    </div>
+
+    <div class="stack">
+        <PostComposer FixedClassroomId="Id" FixedClassroomName="@_classroom.Name" OnPublished="LoadPostsAsync" />
+
+        <div class="card">
+            <h2>Colegas de turma</h2>
+            <div class="row">
+                @foreach (var student in _students)
+                {
+                    <a class="row" href="@($"/perfil/{student.Slug}")">
+                        <AvatarView Image="student.Image" Name="student.Name" Size="small" />
+                        <span class="small">@student.Name</span>
+                    </a>
+                }
+            </div>
+        </div>
+
+        @if (_posts.Count == 0)
+        {
+            <div class="card muted">Nenhum post nesta turma ainda.</div>
+        }
+        else
+        {
+            @foreach (var post in _posts)
+            {
+                <PostCard Post="post" OnToggleReaction="ToggleReactionAsync" />
+            }
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Classroom? _classroom;
+    private List<User> _students = new();
+    private List<ListPostsViewModel> _posts = new();
+    private bool _loading = true;
+
+    protected override async Task OnReadyAsync()
+    {
+        _classroom = await Scope.UseAsync<ClassroomService, Classroom?>(
+            service => service.GetAsync(UserId, Id));
+
+        if (_classroom != null)
+        {
+            _students = await Scope.UseAsync<ClassroomService, List<User>>(
+                service => service.StudentsAsync(Id));
+
+            await LoadPostsAsync();
+        }
+
+        _loading = false;
+    }
+
+    private async Task LoadPostsAsync()
+        => _posts = await Scope.UseAsync<PostService, List<ListPostsViewModel>>(
+            service => service.GetFeedAsync(UserId, Id, pageSize: 50));
+
+    private async Task ToggleReactionAsync(ListPostsViewModel post)
+    {
+        var (reacted, total) = await Scope.UseAsync<PostService, (bool, int)>(
+            service => service.ToggleReactionAsync(UserId, post.Id));
+
+        post.ReactedByMe = reacted;
+        post.Reactions = total;
+    }
+}

@@ -1,71 +1,66 @@
-﻿using System;
-using System.Collections.Generic;
-using Blog.Models;
+using Lingua.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Blog.Data.Mappings
+namespace Lingua.Data.Mappings;
+
+public class PostMap : IEntityTypeConfiguration<Post>
 {
-    public class PostMap : IEntityTypeConfiguration<Post>
+    public void Configure(EntityTypeBuilder<Post> builder)
     {
-        public void Configure(EntityTypeBuilder<Post> builder)
-        {
-            // Tabela
-            builder.ToTable("Post");
+        builder.ToTable("Post");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedOnAdd();
 
-            // Chave Primária
-            builder.HasKey(x => x.Id);
+        builder.Property(x => x.Title).IsRequired().HasMaxLength(160);
+        builder.Property(x => x.Summary).IsRequired().HasMaxLength(255);
+        builder.Property(x => x.Body).IsRequired();
+        builder.Property(x => x.Slug).IsRequired().HasMaxLength(180);
+        builder.Property(x => x.Scope).HasConversion<int>();
+        builder.Property(x => x.Status).HasConversion<int>();
 
-            // Identity
-            builder.Property(x => x.Id)
-                .ValueGeneratedOnAdd()
-                .UseIdentityColumn();
+        builder.HasIndex(x => x.Slug, "IX_Post_Slug").IsUnique();
 
-            // Propriedades
-            builder.Property(x => x.LastUpdateDate)
-                .IsRequired()
-                .HasColumnName("LastUpdateDate")
-                .HasColumnType("SMALLDATETIME")
-                .HasMaxLength(60)
-                .HasDefaultValueSql("GETDATE()");
-            // .HasDefaultValue(DateTime.Now.ToUniversalTime());
+        // O feed sempre lê por mural e data, então o índice acompanha essa ordem.
+        builder.HasIndex(x => new { x.ClassroomId, x.LastUpdateDate }, "IX_Post_Classroom_Date");
 
-            // Índices
-            builder
-                .HasIndex(x => x.Slug, "IX_Post_Slug")
-                .IsUnique();
+        builder
+            .HasOne(x => x.Author)
+            .WithMany(x => x.Posts)
+            .HasForeignKey(x => x.AuthorId)
+            .HasConstraintName("FK_Post_Author")
+            .OnDelete(DeleteBehavior.Cascade);
 
-            // Relacionamentos
-            builder
-                .HasOne(x => x.Author)
-                .WithMany(x => x.Posts)
-                .HasConstraintName("FK_Post_Author")
-                .OnDelete(DeleteBehavior.Cascade);
+        builder
+            .HasOne(x => x.Classroom)
+            .WithMany(x => x.Posts)
+            .HasForeignKey(x => x.ClassroomId)
+            .HasConstraintName("FK_Post_Classroom")
+            .OnDelete(DeleteBehavior.Cascade);
 
-            builder
-                .HasOne(x => x.Category)
-                .WithMany(x => x.Posts)
-                .HasConstraintName("FK_Post_Category")
-                .OnDelete(DeleteBehavior.Cascade);
+        builder
+            .HasOne(x => x.Topic)
+            .WithMany(x => x.Posts)
+            .HasForeignKey(x => x.TopicId)
+            .HasConstraintName("FK_Post_Topic")
+            .OnDelete(DeleteBehavior.SetNull);
 
-            // Relacionamentos
-            builder
-                .HasMany(x => x.Tags)
-                .WithMany(x => x.Posts)
-                .UsingEntity<Dictionary<string, object>>(
-                    "PostTag",
-                    post => post
-                        .HasOne<Tag>()
-                        .WithMany()
-                        .HasForeignKey("PostId")
-                        .HasConstraintName("FK_PostRole_PostId")
-                        .OnDelete(DeleteBehavior.Cascade),
-                    tag => tag
-                        .HasOne<Post>()
-                        .WithMany()
-                        .HasForeignKey("TagId")
-                        .HasConstraintName("FK_PostTag_TagId")
-                        .OnDelete(DeleteBehavior.Cascade));
-        }
+        builder
+            .HasMany(x => x.Tags)
+            .WithMany(x => x.Posts)
+            .UsingEntity<Dictionary<string, object>>(
+                "PostTag",
+                tag => tag
+                    .HasOne<Tag>()
+                    .WithMany()
+                    .HasForeignKey("TagId")
+                    .HasConstraintName("FK_PostTag_TagId")
+                    .OnDelete(DeleteBehavior.Cascade),
+                post => post
+                    .HasOne<Post>()
+                    .WithMany()
+                    .HasForeignKey("PostId")
+                    .HasConstraintName("FK_PostTag_PostId")
+                    .OnDelete(DeleteBehavior.Cascade));
     }
 }

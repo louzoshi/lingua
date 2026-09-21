@@ -1,0 +1,114 @@
+@page "/perfil/{Slug}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@inject ScopeRunner Scope
+@inject NavigationManager Navigation
+
+<PageTitle>@(_profile?.Name ?? "Perfil") · Lingua</PageTitle>
+
+@if (_loading)
+{
+    <div class="card muted">Carregando...</div>
+}
+else if (_profile == null)
+{
+    <div class="card">
+        <h1>Perfil não encontrado</h1>
+    </div>
+}
+else
+{
+    <div class="card">
+        <div class="profile-head">
+            <AvatarView Image="_profile.Image" Name="_profile.Name" />
+            <div style="flex:1">
+                <h1>@_profile.Name</h1>
+                <p class="muted">
+                    <span class="badge accent">@(_profile.IsTeacher ? "Professora" : _profile.Level.ToString())</span>
+                    @if (!string.IsNullOrWhiteSpace(_profile.Location))
+                    {
+                        <span> · @_profile.Location</span>
+                    }
+                    <span> · na plataforma desde @_profile.CreatedAt.ToLocalTime().ToString("MM/yyyy")</span>
+                </p>
+                @if (!string.IsNullOrWhiteSpace(_profile.Bio))
+                {
+                    <p>@_profile.Bio</p>
+                }
+                @if (_profile.Classrooms.Count > 0)
+                {
+                    <div class="row">
+                        @foreach (var classroom in _profile.Classrooms)
+                        {
+                            <span class="badge">@classroom</span>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="row">
+                @if (_profile.Id == UserId)
+                {
+                    <a class="btn ghost" href="/meu-perfil">Editar perfil</a>
+                }
+                else if (_profile.CanMessage)
+                {
+                    <button class="btn" type="button" @onclick="MessageAsync">Mandar mensagem</button>
+                }
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat"><b>@_profile.Points</b><span class="small muted">pontos</span></div>
+            <div class="stat">
+                <b>@(_profile.RankPosition == 0 ? "—" : $"#{_profile.RankPosition}")</b>
+                <span class="small muted">no ranking (30d)</span>
+            </div>
+            <div class="stat"><b>@_profile.PostCount</b><span class="small muted">posts</span></div>
+            <div class="stat"><b>@_profile.CommentCount</b><span class="small muted">comentários</span></div>
+            <div class="stat"><b>@_profile.LessonsAttended</b><span class="small muted">aulas</span></div>
+            <div class="stat"><b>@_profile.AssignmentsSubmitted</b><span class="small muted">trabalhos</span></div>
+        </div>
+    </div>
+
+    <h2 style="margin:1.25rem 0 .5rem">Últimos posts</h2>
+
+    @if (_profile.RecentPosts.Count == 0)
+    {
+        <div class="card muted">Nenhum post publicado ainda.</div>
+    }
+    else
+    {
+        <div class="stack">
+            @foreach (var post in _profile.RecentPosts)
+            {
+                <PostCard Post="post" />
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public string Slug { get; set; } = string.Empty;
+
+    private StudentProfileViewModel? _profile;
+    private bool _loading = true;
+
+    protected override async Task OnReadyAsync()
+    {
+        _profile = await Scope.UseAsync<ProfileService, StudentProfileViewModel?>(
+            service => service.GetAsync(Slug, UserId));
+
+        _loading = false;
+    }
+
+    private async Task MessageAsync()
+    {
+        var conversation = await Scope.UseAsync<ConversationService, Conversation?>(
+            service => service.GetOrCreateAsync(UserId, _profile!.Id));
+
+        if (conversation != null)
+            Navigation.NavigateTo("/mensagens");
+    }
+}

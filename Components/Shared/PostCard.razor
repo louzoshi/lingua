@@ -1,0 +1,52 @@
+<article class="post">
+    <div class="post-head">
+        <AvatarView Image="Post.AuthorImage" Name="Post.AuthorName" />
+        <div>
+            <a href="@($"/perfil/{Post.AuthorSlug}")">@Post.AuthorName</a>
+            <div class="small muted">
+                @Moment
+                @if (Post.Classroom != null)
+                {
+                    <span> · </span>
+                    <span class="badge accent">@Post.Classroom</span>
+                }
+                else
+                {
+                    <span> · </span>
+                    <span class="badge">Mural geral</span>
+                }
+                @if (Post.Topic != null)
+                {
+                    <span> · </span>
+                    <span class="badge">@Post.Topic</span>
+                }
+                @if (Post.Status == ModerationStatus.Hidden)
+                {
+                    <span> · </span>
+                    <span class="badge warn">Escondido</span>
+                }
+            </div>
+        </div>
+    </div>
+
+    <h3 class="post-title">
+        <a href="@($"/posts/{Post.Id}")">@Post.Title</a>
+    </h3>
+    <p class="muted">@Post.Summary</p>
+
+    <div class="post-actions">
+        <button class="btn ghost small" type="button" @onclick="OnReact">
+            @(Post.ReactedByMe ? "Curtido" : "Curtir") · @Post.Reactions
+        </button>
+        <a class="btn ghost small" href="@($"/posts/{Post.Id}")">Comentários · @Post.Comments</a>
+    </div>
+</article>
+
+@code {
+    [Parameter, EditorRequired] public ListPostsViewModel Post { get; set; } = null!;
+    [Parameter] public EventCallback<ListPostsViewModel> OnToggleReaction { get; set; }
+
+    private string Moment => Post.LastUpdateDate.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+
+    private Task OnReact() => OnToggleReaction.InvokeAsync(Post);
+}

@@ -1,0 +1,17 @@
+@if (!string.IsNullOrWhiteSpace(Image))
+{
+    <img class="avatar @Size" src="@Image" alt="@Name" />
+}
+else
+{
+    <span class="avatar @Size">@Letter</span>
+}
+
+@code {
+    [Parameter] public string? Image { get; set; }
+    [Parameter] public string? Name { get; set; }
+    [Parameter] public string Size { get; set; } = string.Empty;
+
+    private string Letter =>
+        string.IsNullOrWhiteSpace(Name) ? "?" : Name.Trim()[..1].ToUpperInvariant();
+}

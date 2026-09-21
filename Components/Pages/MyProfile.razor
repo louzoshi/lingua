@@ -1,0 +1,167 @@
+@page "/meu-perfil"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@using Microsoft.EntityFrameworkCore
+@using SecureIdentity.Password
+@inject ScopeRunner Scope
+
+<PageTitle>Meu perfil · Lingua</PageTitle>
+
+<div class="page-head">
+    <h1>Meu perfil</h1>
+    <p class="muted">Como os colegas te veem na plataforma.</p>
+</div>
+
+@if (_message != null)
+{
+    <div class="alert">@_message</div>
+}
+@if (_error != null)
+{
+    <div class="alert error">@_error</div>
+}
+
+<div class="card">
+    <h2>Dados</h2>
+    <EditForm Model="_profile" OnValidSubmit="SaveProfileAsync" FormName="profile">
+        <DataAnnotationsValidator />
+        <div class="fields-2">
+            <div class="field">
+                <label>Nome</label>
+                <InputText @bind-Value="_profile.Name" />
+                <ValidationMessage For="() => _profile.Name" />
+            </div>
+            <div class="field">
+                <label>Nível</label>
+                <InputSelect @bind-Value="_profile.Level">
+                    @foreach (var level in Enum.GetValues<EnglishLevel>())
+                    {
+                        <option value="@level">@level</option>
+                    }
+                </InputSelect>
+            </div>
+            <div class="field">
+                <label>Cidade</label>
+                <InputText @bind-Value="_profile.Location" />
+            </div>
+        </div>
+        <div class="field">
+            <label>Bio</label>
+            <InputTextArea @bind-Value="_profile.Bio" placeholder="Tell your classmates about yourself." />
+        </div>
+        <button class="btn" type="submit">Salvar</button>
+    </EditForm>
+</div>
+
+<div class="card" style="margin-top:1rem">
+    <h2>Senha</h2>
+    <EditForm Model="_password" OnValidSubmit="ChangePasswordAsync" FormName="password">
+        <DataAnnotationsValidator />
+        <div class="fields-2">
+            <div class="field">
+                <label>Senha atual</label>
+                <InputText type="password" @bind-Value="_password.CurrentPassword" />
+                <ValidationMessage For="() => _password.CurrentPassword" />
+            </div>
+            <div class="field">
+                <label>Nova senha</label>
+                <InputText type="password" @bind-Value="_password.NewPassword" />
+                <ValidationMessage For="() => _password.NewPassword" />
+            </div>
+        </div>
+        <button class="btn" type="submit">Trocar senha</button>
+    </EditForm>
+</div>
+
+@code {
+    private UpdateProfileViewModel _profile = new();
+    private ChangePasswordViewModel _password = new();
+    private string? _message;
+    private string? _error;
+
+    protected override async Task OnReadyAsync()
+    {
+        var userId = UserId;
+
+        var user = await Scope.RunAsync(async sp =>
+            await sp.GetRequiredService<LinguaDataContext>()
+                .Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == userId));
+
+        if (user == null)
+            return;
+
+        _profile = new UpdateProfileViewModel
+        {
+            Name = user.Name,
+            Bio = user.Bio,
+            Location = user.Location,
+            Level = user.Level
+        };
+    }
+
+    private async Task SaveProfileAsync()
+    {
+        Reset();
+
+        var userId = UserId;
+        var model = _profile;
+
+        await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+            var user = await context.Users.FirstOrDefaultAsync(x => x.Id == userId);
+
+            if (user == null)
+                return;
+
+            user.Name = model.Name.Trim();
+            user.Bio = model.Bio;
+            user.Location = model.Location;
+            user.Level = model.Level;
+
+            await context.SaveChangesAsync();
+        });
+
+        _message = "Perfil atualizado. O nome no menu muda no próximo login.";
+    }
+
+    private async Task ChangePasswordAsync()
+    {
+        Reset();
+
+        var userId = UserId;
+        var model = _password;
+
+        var ok = await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+            var user = await context.Users.FirstOrDefaultAsync(x => x.Id == userId);
+
+            if (user == null || !PasswordHasher.Verify(user.PasswordHash, model.CurrentPassword))
+                return false;
+
+            user.PasswordHash = PasswordHasher.Hash(model.NewPassword);
+            await context.SaveChangesAsync();
+
+            return true;
+        });
+
+        if (!ok)
+        {
+            _error = "Senha atual incorreta.";
+            return;
+        }
+
+        _password = new ChangePasswordViewModel();
+        _message = "Senha alterada.";
+    }
+
+    private void Reset()
+    {
+        _message = null;
+        _error = null;
+    }
+}

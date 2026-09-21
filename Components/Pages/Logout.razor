@@ -1,0 +1,34 @@
+@page "/sair"
+@layout EmptyLayout
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@inject NavigationManager Navigation
+
+<PageTitle>Sair · Lingua</PageTitle>
+
+<div class="auth">
+    <div class="card">
+        <h1>Sair da plataforma</h1>
+        <p class="muted">Você vai precisar entrar de novo com e-mail e senha.</p>
+
+        <EditForm Model="this" OnValidSubmit="SignOutAsync" FormName="logout" method="post">
+            <div class="row">
+                <button class="btn" type="submit">Sair</button>
+                <a class="btn ghost" href="/">Cancelar</a>
+            </div>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private async Task SignOutAsync()
+    {
+        if (HttpContext != null)
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+
+        Navigation.NavigateTo("/entrar", true);
+    }
+}

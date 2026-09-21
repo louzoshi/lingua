@@ -1,0 +1,59 @@
+@page "/turmas"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@inject ScopeRunner Scope
+
+<PageTitle>Minhas turmas · Lingua</PageTitle>
+
+<div class="page-head">
+    <h1>Minhas turmas</h1>
+    <p class="muted">Cada turma tem o próprio mural, as aulas e os trabalhos.</p>
+</div>
+
+@if (_loading)
+{
+    <div class="card muted">Carregando...</div>
+}
+else if (_classrooms.Count == 0)
+{
+    <div class="card">
+        <h2>Você ainda não está em nenhuma turma</h2>
+        <p class="muted">Assim que a professora te matricular, a turma aparece aqui.</p>
+    </div>
+}
+else
+{
+    <div class="grid">
+        @foreach (var classroom in _classrooms)
+        {
+            <a class="card" href="@($"/turmas/{classroom.Id}")">
+                <div class="row between">
+                    <h2>@classroom.Name</h2>
+                    <span class="badge accent">@classroom.Level</span>
+                </div>
+                <p class="muted small">@classroom.Description</p>
+                <div class="row small muted">
+                    <span>@classroom.TeacherName</span>
+                    <span>·</span>
+                    <span>@classroom.Students aluno(s)</span>
+                    <span>·</span>
+                    <span>@classroom.Posts post(s)</span>
+                </div>
+            </a>
+        }
+    </div>
+}
+
+@code {
+    private List<ListClassroomsViewModel> _classrooms = new();
+    private bool _loading = true;
+
+    protected override async Task OnReadyAsync()
+    {
+        _classrooms = await Scope.UseAsync<ClassroomService, List<ListClassroomsViewModel>>(
+            service => service.ForUserAsync(UserId));
+
+        _loading = false;
+    }
+}

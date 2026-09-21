@@ -452,3 +452,10 @@ $RECYCLE.BIN/
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+# Banco local do SQLite e imagens enviadas em desenvolvimento
+lingua.db
+lingua.db-shm
+lingua.db-wal
+wwwroot/images/*
+!wwwroot/images/.gitkeep

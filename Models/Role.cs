@@ -1,13 +1,15 @@
-using System.Collections.Generic;
+namespace Lingua.Models;
 
-namespace Blog.Models
+public class Role
 {
-    public class Role
-    {
-        public int Id { get; set; }
-        public string Name { get; set; }
-        public string Slug { get; set; }
+    /// <summary>Slugs usados nas policies de autorização.</summary>
+    public const string Student = "student";
+    public const string Teacher = "teacher";
+    public const string Admin = "admin";
 
-        public IList<User> Users { get; set; }
-    }
+    public int Id { get; set; }
+    public string Name { get; set; } = null!;
+    public string Slug { get; set; } = null!;
+
+    public IList<User> Users { get; set; } = new List<User>();
 }

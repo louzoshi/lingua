@@ -1,0 +1,26 @@
+@page "/novo-post"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@inject ScopeRunner Scope
+
+<PageTitle>Escrever post · Lingua</PageTitle>
+
+<div class="page-head">
+    <h1>Escrever post</h1>
+    <p class="muted">Escolha se o post vai para o mural geral ou para o mural de uma turma.</p>
+</div>
+
+<PostComposer Classrooms="_classrooms" StartOpen OnPublished="GoToFeed" />
+
+@code {
+    [Inject] private NavigationManager Navigation { get; set; } = null!;
+
+    private List<ListClassroomsViewModel> _classrooms = new();
+
+    protected override async Task OnReadyAsync()
+        => _classrooms = await Scope.UseAsync<ClassroomService, List<ListClassroomsViewModel>>(
+            service => service.ForUserAsync(UserId));
+
+    private void GoToFeed() => Navigation.NavigateTo("/");
+}

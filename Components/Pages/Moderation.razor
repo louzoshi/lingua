@@ -1,0 +1,119 @@
+@page "/moderacao"
+@attribute [Authorize(Policy = Policies.Teacher)]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@using Microsoft.EntityFrameworkCore
+@inject ScopeRunner Scope
+
+<PageTitle>Moderação · Lingua</PageTitle>
+
+<div class="page-head">
+    <h1>Moderação</h1>
+    <p class="muted">
+        O que os alunos escreveram recentemente e as mensagens privadas que alguém pediu para você revisar.
+    </p>
+</div>
+
+<h2>Posts recentes</h2>
+<div class="stack">
+    @foreach (var post in _posts)
+    {
+        <div class="card row between">
+            <div>
+                <a href="@($"/posts/{post.Id}")">@post.Title</a>
+                <div class="small muted">
+                    @post.AuthorName · @ShortDate(post.LastUpdateDate) ·
+                    <span class="badge">@(post.Classroom ?? "Mural geral")</span>
+                    @if (post.Status == ModerationStatus.Hidden)
+                    {
+                        <span class="badge warn">Escondido</span>
+                    }
+                </div>
+            </div>
+            <button class="btn ghost small" type="button" @onclick="() => TogglePostAsync(post)">
+                @(post.Status == ModerationStatus.Hidden ? "Republicar" : "Esconder")
+            </button>
+        </div>
+    }
+</div>
+
+<h2 style="margin-top:1.5rem">Mensagens sinalizadas</h2>
+@if (_flagged.Count == 0)
+{
+    <div class="card muted">Nenhuma mensagem foi sinalizada.</div>
+}
+else
+{
+    <div class="stack">
+        @foreach (var message in _flagged)
+        {
+            <div class="card row between">
+                <div>
+                    <div class="small muted">@message.SenderName · @ShortDate(message.SentAt)</div>
+                    <div>@message.Body</div>
+                </div>
+                <button class="btn ghost small" type="button" @onclick="() => ResolveAsync(message)">
+                    Marcar como resolvida
+                </button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<ListPostsViewModel> _posts = new();
+    private List<DirectMessageViewModel> _flagged = new();
+
+    protected override async Task OnReadyAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _posts = await Scope.UseAsync<PostService, List<ListPostsViewModel>>(
+            service => service.GetFeedAsync(UserId, pageSize: 30));
+
+        _flagged = await Scope.RunAsync(async sp =>
+            await sp.GetRequiredService<LinguaDataContext>()
+                .DirectMessages
+                .AsNoTracking()
+                .Where(x => x.IsFlagged)
+                .OrderByDescending(x => x.SentAt)
+                .Select(x => new DirectMessageViewModel
+                {
+                    Id = x.Id,
+                    ConversationId = x.ConversationId,
+                    Body = x.Body,
+                    SentAt = x.SentAt,
+                    SenderId = x.SenderId,
+                    SenderName = x.Sender.Name,
+                    IsFlagged = x.IsFlagged
+                })
+                .ToListAsync());
+    }
+
+    private async Task TogglePostAsync(ListPostsViewModel post)
+    {
+        var status = post.Status == ModerationStatus.Hidden
+            ? ModerationStatus.Published
+            : ModerationStatus.Hidden;
+
+        await Scope.UseAsync<PostService>(service => service.SetPostStatusAsync(post.Id, status));
+        post.Status = status;
+    }
+
+    private async Task ResolveAsync(DirectMessageViewModel model)
+    {
+        await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+            var message = await context.DirectMessages.FirstOrDefaultAsync(x => x.Id == model.Id);
+
+            if (message == null)
+                return;
+
+            message.IsFlagged = false;
+            await context.SaveChangesAsync();
+        });
+
+        _flagged.Remove(model);
+    }
+}

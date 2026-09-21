@@ -1,0 +1,126 @@
+@page "/gerenciar/entregas/{Id:int}"
+@attribute [Authorize(Policy = Policies.Teacher)]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@using Microsoft.EntityFrameworkCore
+@inject ScopeRunner Scope
+
+<PageTitle>Entregas · Lingua</PageTitle>
+
+<div class="page-head">
+    <h1>Entregas</h1>
+    <p class="muted">@_title</p>
+</div>
+
+@if (_submissions.Count == 0)
+{
+    <div class="card muted">Nenhum aluno entregou ainda.</div>
+}
+else
+{
+    <div class="stack">
+        @foreach (var submission in _submissions)
+        {
+            <div class="card">
+                <div class="row between">
+                    <div>
+                        <h3>@submission.StudentName</h3>
+                        <div class="small muted">Entregue em @ShortDate(submission.SubmittedAt)</div>
+                        @if (!string.IsNullOrWhiteSpace(submission.Notes))
+                        {
+                            <p class="small muted">@submission.Notes</p>
+                        }
+                    </div>
+                    <a class="btn ghost" href="@submission.Url" target="_blank" rel="noreferrer">Abrir trabalho</a>
+                </div>
+
+                <div class="fields-2" style="margin-top:.75rem">
+                    <div class="field">
+                        <label>Nota (0 a 100)</label>
+                        <input type="number" min="0" max="100" step="0.5"
+                               value="@submission.Grade"
+                               @onchange="e => submission.Grade = Parse(e.Value)" />
+                    </div>
+                    <div class="field">
+                        <label>Feedback</label>
+                        <input value="@submission.Feedback"
+                               @onchange="e => submission.Feedback = e.Value?.ToString()" />
+                    </div>
+                </div>
+
+                <button class="btn small" type="button" @onclick="() => SaveAsync(submission)">Salvar correção</button>
+
+                @if (submission.ReviewedAt.HasValue)
+                {
+                    <span class="badge accent" style="margin-left:.5rem">
+                        Corrigido em @ShortDate(submission.ReviewedAt.Value)
+                    </span>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private List<SubmissionViewModel> _submissions = new();
+    private string _title = string.Empty;
+
+    protected override async Task OnReadyAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var assignmentId = Id;
+
+        _submissions = await Scope.RunAsync(async sp =>
+            await sp.GetRequiredService<LinguaDataContext>()
+                .AssignmentSubmissions
+                .AsNoTracking()
+                .Where(x => x.AssignmentId == assignmentId)
+                .OrderBy(x => x.Student.Name)
+                .Select(x => new SubmissionViewModel
+                {
+                    Id = x.Id,
+                    AssignmentId = x.AssignmentId,
+                    AssignmentTitle = x.Assignment.Title,
+                    StudentId = x.StudentId,
+                    StudentName = x.Student.Name,
+                    Url = x.Url,
+                    Notes = x.Notes,
+                    SubmittedAt = x.SubmittedAt,
+                    Grade = x.Grade,
+                    Feedback = x.Feedback,
+                    ReviewedAt = x.ReviewedAt
+                })
+                .ToListAsync());
+
+        _title = _submissions.FirstOrDefault()?.AssignmentTitle ?? "Trabalho";
+    }
+
+    private async Task SaveAsync(SubmissionViewModel model)
+    {
+        await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+
+            var submission = await context
+                .AssignmentSubmissions
+                .FirstOrDefaultAsync(x => x.Id == model.Id);
+
+            if (submission == null)
+                return;
+
+            submission.Grade = model.Grade;
+            submission.Feedback = model.Feedback;
+            submission.ReviewedAt = DateTime.UtcNow;
+
+            await context.SaveChangesAsync();
+        });
+
+        await LoadAsync();
+    }
+
+    private static decimal? Parse(object? value)
+        => decimal.TryParse(value?.ToString(), out var parsed) ? parsed : null;
+}

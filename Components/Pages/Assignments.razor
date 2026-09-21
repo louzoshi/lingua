@@ -1,0 +1,213 @@
+@page "/trabalhos"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@using Microsoft.EntityFrameworkCore
+@inject ScopeRunner Scope
+
+<PageTitle>Trabalhos · Lingua</PageTitle>
+
+<div class="page-head">
+    <h1>Trabalhos</h1>
+    <p class="muted">Os links dos trabalhos passados pela professora e o que você já entregou.</p>
+</div>
+
+<div class="card" style="margin-bottom:1rem">
+    <select @bind="_classroomId" @bind:after="LoadAsync" style="width:auto">
+        <option value="">Todas as turmas</option>
+        @foreach (var classroom in _classrooms)
+        {
+            <option value="@classroom.Id">@classroom.Name</option>
+        }
+    </select>
+</div>
+
+@if (_assignments.Count == 0)
+{
+    <div class="card muted">Nenhum trabalho por enquanto.</div>
+}
+else
+{
+    <div class="stack">
+        @foreach (var assignment in _assignments)
+        {
+            <div class="card">
+                <div class="row between">
+                    <div>
+                        <h3>@assignment.Title</h3>
+                        <div class="small muted">
+                            <span class="badge accent">@assignment.Classroom</span>
+                            @if (assignment.DueDate.HasValue)
+                            {
+                                <span> · entrega até @assignment.DueDate.Value.ToLocalTime().ToString("dd/MM/yyyy")</span>
+                            }
+                            @if (assignment.SubmittedByMe)
+                            {
+                                <span> · </span>
+                                <span class="badge accent">Entregue</span>
+                            }
+                            @if (assignment.MyGrade.HasValue)
+                            {
+                                <span> · nota @assignment.MyGrade.Value.ToString("0.##")</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="row">
+                        @if (!string.IsNullOrWhiteSpace(assignment.Url))
+                        {
+                            <a class="btn ghost" href="@assignment.Url" target="_blank" rel="noreferrer">Abrir enunciado</a>
+                        }
+                        <button class="btn" type="button" @onclick="() => Open(assignment)">
+                            @(assignment.SubmittedByMe ? "Reenviar" : "Entregar")
+                        </button>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(assignment.Instructions))
+                {
+                    <p class="muted small">@assignment.Instructions</p>
+                }
+
+                @if (_submitting?.Id == assignment.Id)
+                {
+                    <EditForm Model="_submission" OnValidSubmit="SubmitAsync" FormName="@($"submit-{assignment.Id}")">
+                        <DataAnnotationsValidator />
+                        <div class="fields-2">
+                            <div class="field">
+                                <label>Link do trabalho</label>
+                                <InputText @bind-Value="_submission.Url" placeholder="https://..." />
+                                <ValidationMessage For="() => _submission.Url" />
+                            </div>
+                            <div class="field">
+                                <label>Observações</label>
+                                <InputText @bind-Value="_submission.Notes" />
+                            </div>
+                        </div>
+                        <div class="row">
+                            <button class="btn" type="submit">Enviar</button>
+                            <button class="btn ghost" type="button" @onclick="() => _submitting = null">Cancelar</button>
+                        </div>
+                    </EditForm>
+                }
+
+                <AuthorizeView Policy="@Policies.Teacher" Context="teacher">
+                    <Authorized>
+                        <div class="small muted" style="margin-top:.5rem">
+                            @assignment.Submissions entrega(s) ·
+                            <a href="@($"/gerenciar/entregas/{assignment.Id}")">ver e corrigir</a>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "turma")]
+    private int? ClassroomFromQuery { get; set; }
+
+    private List<ListAssignmentsViewModel> _assignments = new();
+    private List<ListClassroomsViewModel> _classrooms = new();
+    private ListAssignmentsViewModel? _submitting;
+    private SubmitAssignmentViewModel _submission = new();
+    private string _classroomId = string.Empty;
+
+    protected override async Task OnReadyAsync()
+    {
+        _classrooms = await Scope.UseAsync<ClassroomService, List<ListClassroomsViewModel>>(
+            service => service.ForUserAsync(UserId));
+
+        if (ClassroomFromQuery.HasValue)
+            _classroomId = ClassroomFromQuery.Value.ToString();
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        int? filter = int.TryParse(_classroomId, out var parsed) ? parsed : null;
+        var userId = UserId;
+
+        _assignments = await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+            var access = sp.GetRequiredService<AccessService>();
+
+            var visibleIds = await access.VisibleClassroomIdsAsync(userId);
+            if (filter.HasValue)
+                visibleIds = visibleIds.Where(x => x == filter.Value).ToList();
+
+            return await context
+                .Assignments
+                .AsNoTracking()
+                .Where(x => visibleIds.Contains(x.ClassroomId))
+                .OrderBy(x => x.DueDate ?? DateTime.MaxValue)
+                .Select(x => new ListAssignmentsViewModel
+                {
+                    Id = x.Id,
+                    Title = x.Title,
+                    Instructions = x.Instructions,
+                    Url = x.Url,
+                    ClassroomId = x.ClassroomId,
+                    Classroom = x.Classroom.Name,
+                    DueDate = x.DueDate,
+                    Submissions = x.Submissions.Count,
+                    SubmittedByMe = x.Submissions.Any(s => s.StudentId == userId),
+                    MyGrade = x.Submissions.Where(s => s.StudentId == userId).Select(s => s.Grade).FirstOrDefault()
+                })
+                .ToListAsync();
+        });
+    }
+
+    private void Open(ListAssignmentsViewModel assignment)
+    {
+        _submitting = assignment;
+        _submission = new SubmitAssignmentViewModel();
+    }
+
+    private async Task SubmitAsync()
+    {
+        var assignment = _submitting!;
+        var userId = UserId;
+        var model = _submission;
+
+        await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+            var interactions = sp.GetRequiredService<InteractionService>();
+
+            var submission = await context
+                .AssignmentSubmissions
+                .FirstOrDefaultAsync(x => x.AssignmentId == assignment.Id && x.StudentId == userId);
+
+            if (submission == null)
+            {
+                await context.AssignmentSubmissions.AddAsync(new AssignmentSubmission
+                {
+                    AssignmentId = assignment.Id,
+                    StudentId = userId,
+                    Url = model.Url,
+                    Notes = model.Notes
+                });
+
+                interactions.Track(
+                    userId,
+                    InteractionType.AssignmentSubmitted,
+                    assignment.ClassroomId,
+                    assignment.Id);
+            }
+            else
+            {
+                submission.Url = model.Url;
+                submission.Notes = model.Notes;
+                submission.SubmittedAt = DateTime.UtcNow;
+            }
+
+            await context.SaveChangesAsync();
+        });
+
+        _submitting = null;
+        await LoadAsync();
+    }
+}

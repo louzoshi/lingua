@@ -1,0 +1,85 @@
+@page "/ranking"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@inject ScopeRunner Scope
+
+<PageTitle>Ranking · Lingua</PageTitle>
+
+<div class="page-head">
+    <h1>Ranking de interação</h1>
+    <p class="muted">
+        Pontua quem faz a turma conversar: post vale 10, comentário 4, presença em aula 15,
+        trabalho entregue 20, curtida 1.
+    </p>
+</div>
+
+<div class="card">
+    <div class="row between" style="margin-bottom:.75rem">
+        <div class="row">
+            <select @bind="_days" @bind:after="LoadAsync" style="width:auto">
+                <option value="7">Últimos 7 dias</option>
+                <option value="30">Últimos 30 dias</option>
+                <option value="90">Últimos 90 dias</option>
+                <option value="0">Desde sempre</option>
+            </select>
+
+            <select @bind="_classroomId" @bind:after="LoadAsync" style="width:auto">
+                <option value="">Todas as turmas</option>
+                @foreach (var classroom in _classrooms)
+                {
+                    <option value="@classroom.Id">@classroom.Name</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    @if (_entries.Count == 0)
+    {
+        <p class="muted">Ainda não há interações registradas nesse período.</p>
+    }
+    else
+    {
+        @foreach (var entry in _entries)
+        {
+            <div class="rank-row @(entry.Position <= 3 ? "top-3" : "")">
+                <span class="rank-position">@entry.Position</span>
+                <AvatarView Image="entry.Image" Name="entry.Name" />
+                <div>
+                    <a href="@($"/perfil/{entry.Slug}")">@entry.Name</a>
+                    <div class="small muted">@entry.Interactions interações · @entry.Level</div>
+                </div>
+                <b>@entry.Points pts</b>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "turma")]
+    private int? ClassroomFromQuery { get; set; }
+
+    private List<RankingEntryViewModel> _entries = new();
+    private List<ListClassroomsViewModel> _classrooms = new();
+    private int _days = 30;
+    private string _classroomId = string.Empty;
+
+    protected override async Task OnReadyAsync()
+    {
+        _classrooms = await Scope.UseAsync<ClassroomService, List<ListClassroomsViewModel>>(
+            service => service.ForUserAsync(UserId));
+
+        if (ClassroomFromQuery.HasValue)
+            _classroomId = ClassroomFromQuery.Value.ToString();
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        int? classroomId = int.TryParse(_classroomId, out var parsed) ? parsed : null;
+
+        _entries = await Scope.UseAsync<InteractionService, List<RankingEntryViewModel>>(
+            service => service.GetRankingAsync(classroomId, _days <= 0 ? null : _days, 50));
+    }
+}

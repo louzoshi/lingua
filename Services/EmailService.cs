@@ -1,38 +1,50 @@
 using System.Net;
 using System.Net.Mail;
 
-namespace Blog.Services;
+namespace Lingua.Services;
 
 public class EmailService
 {
-    public bool Send(
-        string toName,
-        string toEmail,
-        string subject,
-        string body,
-        string fromName = "Equipe do Blog",
-        string fromEmail = "blogEmail@gmail.com")
+    private readonly ILogger<EmailService> _logger;
+
+    public EmailService(ILogger<EmailService> logger)
+        => _logger = logger;
+
+    public bool Send(string toName, string toEmail, string subject, string body)
     {
-        var smtpClient = new SmtpClient(Configuration.Smtp.Host, Configuration.Smtp.Port);
+        var smtp = Configuration.Smtp;
 
-        smtpClient.Credentials = new NetworkCredential(Configuration.Smtp.UserName, Configuration.Smtp.Password);
-        smtpClient.DeliveryMethod = SmtpDeliveryMethod.Network;
-        smtpClient.EnableSsl = true;
-        var mail = new MailMessage();
+        if (string.IsNullOrWhiteSpace(smtp.Host))
+        {
+            // Sem SMTP configurado a plataforma continua funcionando; o convite fica no log.
+            _logger.LogWarning("SMTP não configurado. E-mail para {Email} não foi enviado.", toEmail);
+            return false;
+        }
 
-        mail.From = new MailAddress(fromEmail, fromName);
+        using var client = new SmtpClient(smtp.Host, smtp.Port)
+        {
+            Credentials = new NetworkCredential(smtp.UserName, smtp.Password),
+            DeliveryMethod = SmtpDeliveryMethod.Network,
+            EnableSsl = true
+        };
+
+        using var mail = new MailMessage
+        {
+            From = new MailAddress(smtp.FromEmail, smtp.FromName),
+            Subject = subject,
+            Body = body,
+            IsBodyHtml = true
+        };
         mail.To.Add(new MailAddress(toEmail, toName));
-        mail.Subject = subject;
-        mail.Body = body;
-        mail.IsBodyHtml = true;
 
         try
         {
-            smtpClient.Send(mail);
+            client.Send(mail);
             return true;
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Falha ao enviar e-mail para {Email}.", toEmail);
             return false;
         }
     }

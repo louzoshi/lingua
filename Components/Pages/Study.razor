@@ -1,0 +1,234 @@
+@page "/estudo"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@using Microsoft.EntityFrameworkCore
+@inject ScopeRunner Scope
+
+<PageTitle>Área de estudo · Lingua</PageTitle>
+
+<div class="page-head">
+    <h1>Área de estudo</h1>
+    <p class="muted">Aulas agendadas, gravações das aulas que já passaram e os materiais da professora.</p>
+</div>
+
+<div class="card" style="margin-bottom:1rem">
+    <div class="row">
+        <select @bind="_classroomId" @bind:after="LoadAsync" style="width:auto">
+            <option value="">Todas as turmas</option>
+            @foreach (var classroom in _classrooms)
+            {
+                <option value="@classroom.Id">@classroom.Name</option>
+            }
+        </select>
+    </div>
+</div>
+
+<h2>Próximas aulas</h2>
+@if (_upcoming.Count == 0)
+{
+    <div class="card muted">Nenhuma aula agendada.</div>
+}
+else
+{
+    <div class="stack">
+        @foreach (var lesson in _upcoming)
+        {
+            <div class="card">
+                <div class="row between">
+                    <div>
+                        <h3>@lesson.Title</h3>
+                        <div class="small muted">
+                            @ShortDate(lesson.ScheduledAt) · @lesson.DurationMinutes min ·
+                            <span class="badge accent">@lesson.Classroom</span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(lesson.Description))
+                        {
+                            <p class="muted small">@lesson.Description</p>
+                        }
+                    </div>
+                    <div class="row">
+                        @if (!string.IsNullOrWhiteSpace(lesson.MeetingUrl))
+                        {
+                            <a class="btn" href="@lesson.MeetingUrl" target="_blank" rel="noreferrer">Entrar na aula</a>
+                        }
+                        @if (!lesson.AttendedByMe)
+                        {
+                            <button class="btn ghost" type="button" @onclick="() => AttendAsync(lesson)">
+                                Marcar presença
+                            </button>
+                        }
+                        else
+                        {
+                            <span class="badge accent">Presença registrada</span>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+<h2 style="margin-top:1.5rem">Aulas gravadas</h2>
+@if (_recorded.Count == 0)
+{
+    <div class="card muted">Nenhuma gravação publicada ainda.</div>
+}
+else
+{
+    <div class="grid">
+        @foreach (var lesson in _recorded)
+        {
+            <div class="card">
+                <h3>@lesson.Title</h3>
+                <div class="small muted">
+                    @lesson.ScheduledAt.ToLocalTime().ToString("dd/MM/yyyy") ·
+                    <span class="badge">@lesson.Classroom</span>
+                </div>
+                <p class="small muted">@lesson.Attendees participante(s)</p>
+                <a class="btn ghost small" href="@lesson.RecordingUrl" target="_blank" rel="noreferrer">
+                    Assistir gravação
+                </a>
+            </div>
+        }
+    </div>
+}
+
+<h2 style="margin-top:1.5rem">Materiais</h2>
+@if (_resources.Count == 0)
+{
+    <div class="card muted">Nenhum material publicado ainda.</div>
+}
+else
+{
+    <div class="grid">
+        @foreach (var resource in _resources)
+        {
+            <div class="card">
+                <div class="row between">
+                    <span class="badge accent">@resource.Kind</span>
+                    <span class="badge">@resource.Level</span>
+                </div>
+                <h3>@resource.Title</h3>
+                <p class="small muted">@resource.Description</p>
+                <a class="btn ghost small" href="@resource.Url" target="_blank" rel="noreferrer">Abrir</a>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "turma")]
+    private int? ClassroomFromQuery { get; set; }
+
+    private List<ListClassroomsViewModel> _classrooms = new();
+    private List<ListLessonsViewModel> _upcoming = new();
+    private List<ListLessonsViewModel> _recorded = new();
+    private List<ListStudyResourcesViewModel> _resources = new();
+    private string _classroomId = string.Empty;
+
+    protected override async Task OnReadyAsync()
+    {
+        _classrooms = await Scope.UseAsync<ClassroomService, List<ListClassroomsViewModel>>(
+            service => service.ForUserAsync(UserId));
+
+        if (ClassroomFromQuery.HasValue)
+            _classroomId = ClassroomFromQuery.Value.ToString();
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        int? filter = int.TryParse(_classroomId, out var parsed) ? parsed : null;
+        var userId = UserId;
+
+        await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+            var access = sp.GetRequiredService<AccessService>();
+
+            var visibleIds = await access.VisibleClassroomIdsAsync(userId);
+            if (filter.HasValue)
+                visibleIds = visibleIds.Where(x => x == filter.Value).ToList();
+
+            var lessons = await context
+                .Lessons
+                .AsNoTracking()
+                .Where(x => visibleIds.Contains(x.ClassroomId))
+                .OrderBy(x => x.ScheduledAt)
+                .Select(x => new ListLessonsViewModel
+                {
+                    Id = x.Id,
+                    Title = x.Title,
+                    Description = x.Description,
+                    ClassroomId = x.ClassroomId,
+                    Classroom = x.Classroom.Name,
+                    ScheduledAt = x.ScheduledAt,
+                    DurationMinutes = x.DurationMinutes,
+                    MeetingUrl = x.MeetingUrl,
+                    RecordingUrl = x.RecordingUrl,
+                    Attendees = x.Attendances.Count,
+                    AttendedByMe = x.Attendances.Any(a => a.StudentId == userId)
+                })
+                .ToListAsync();
+
+            _upcoming = lessons
+                .Where(x => x.ScheduledAt >= DateTime.UtcNow.AddHours(-3))
+                .ToList();
+
+            _recorded = lessons
+                .Where(x => !string.IsNullOrWhiteSpace(x.RecordingUrl))
+                .OrderByDescending(x => x.ScheduledAt)
+                .ToList();
+
+            _resources = await context
+                .StudyResources
+                .AsNoTracking()
+                .Where(x => x.ClassroomId == null || visibleIds.Contains(x.ClassroomId.Value))
+                .OrderByDescending(x => x.CreatedAt)
+                .Select(x => new ListStudyResourcesViewModel
+                {
+                    Id = x.Id,
+                    Title = x.Title,
+                    Description = x.Description,
+                    Url = x.Url,
+                    Kind = x.Kind,
+                    Level = x.Level,
+                    Classroom = x.Classroom != null ? x.Classroom.Name : null,
+                    CreatedAt = x.CreatedAt
+                })
+                .ToListAsync();
+        });
+    }
+
+    private async Task AttendAsync(ListLessonsViewModel lesson)
+    {
+        var userId = UserId;
+
+        await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+            var interactions = sp.GetRequiredService<InteractionService>();
+
+            var already = await context
+                .LessonAttendances
+                .AnyAsync(x => x.LessonId == lesson.Id && x.StudentId == userId);
+
+            if (already)
+                return;
+
+            await context.LessonAttendances.AddAsync(new LessonAttendance
+            {
+                LessonId = lesson.Id,
+                StudentId = userId
+            });
+
+            interactions.Track(userId, InteractionType.LessonAttended, lesson.ClassroomId, lesson.Id);
+            await context.SaveChangesAsync();
+        });
+
+        lesson.AttendedByMe = true;
+        lesson.Attendees++;
+    }
+}

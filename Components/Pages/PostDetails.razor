@@ -1,0 +1,200 @@
+@page "/posts/{Id:int}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@inject ScopeRunner Scope
+@inject NavigationManager Navigation
+
+<PageTitle>@(_post?.Title ?? "Post") · Lingua</PageTitle>
+
+@if (_loading)
+{
+    <div class="card muted">Carregando...</div>
+}
+else if (_post == null)
+{
+    <div class="card">
+        <h1>Post indisponível</h1>
+        <p class="muted">Ele foi removido ou pertence a uma turma da qual você não participa.</p>
+    </div>
+}
+else
+{
+    <article class="card">
+        <div class="post-head">
+            <AvatarView Image="_post.AuthorImage" Name="_post.AuthorName" />
+            <div>
+                <a href="@($"/perfil/{_post.AuthorSlug}")">@_post.AuthorName</a>
+                <div class="small muted">
+                    @ShortDate(_post.CreatedAt)
+                    <span> · </span>
+                    <span class="badge @(_post.Classroom == null ? "" : "accent")">
+                        @(_post.Classroom ?? "Mural geral")
+                    </span>
+                    @if (_post.Status == ModerationStatus.Hidden)
+                    {
+                        <span class="badge warn">Escondido</span>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <h1>@_post.Title</h1>
+        <p class="muted">@_post.Summary</p>
+        <div class="post-body">@_post.Body</div>
+
+        @if (_post.Tags.Count > 0)
+        {
+            <div class="row" style="margin-top:.75rem">
+                @foreach (var tag in _post.Tags)
+                {
+                    <span class="badge">#@tag</span>
+                }
+            </div>
+        }
+
+        <div class="post-actions">
+            <button class="btn ghost small" type="button" @onclick="ToggleReactionAsync">
+                @(_post.ReactedByMe ? "Curtido" : "Curtir") · @_post.Reactions
+            </button>
+
+            @if (_post.CanModerate)
+            {
+                <button class="btn ghost small" type="button" @onclick="ToggleVisibilityAsync">
+                    @(_post.Status == ModerationStatus.Hidden ? "Republicar" : "Esconder")
+                </button>
+            }
+
+            @if (_post.CanEdit)
+            {
+                <button class="btn danger small" type="button" @onclick="DeleteAsync">Apagar</button>
+            }
+        </div>
+    </article>
+
+    <div class="card" style="margin-top:1rem">
+        <h2>Comentários (@_post.Comments.Count)</h2>
+
+        @if (_error != null)
+        {
+            <div class="alert error">@_error</div>
+        }
+
+        <EditForm Model="_comment" OnValidSubmit="CommentAsync" FormName="comment">
+            <DataAnnotationsValidator />
+            <div class="field">
+                <InputTextArea @bind-Value="_comment.Body" placeholder="Leave a comment in English..." />
+                <ValidationMessage For="() => _comment.Body" />
+            </div>
+            <button class="btn" type="submit" disabled="@_saving">Comentar</button>
+        </EditForm>
+
+        @foreach (var comment in _post.Comments)
+        {
+            <div class="comment">
+                <AvatarView Image="comment.AuthorImage" Name="comment.AuthorName" Size="small" />
+                <div style="flex:1">
+                    <div class="small">
+                        <a href="@($"/perfil/{comment.AuthorSlug}")">@comment.AuthorName</a>
+                        <span class="muted"> · @RelativeDate(comment.CreatedAt)</span>
+                        @if (comment.Status == ModerationStatus.Hidden)
+                        {
+                            <span class="badge warn">Escondido</span>
+                        }
+                    </div>
+                    <div>@comment.Body</div>
+                </div>
+
+                @if (_post.CanModerate)
+                {
+                    <button class="btn ghost small" type="button" @onclick="() => ToggleCommentAsync(comment)">
+                        @(comment.Status == ModerationStatus.Hidden ? "Liberar" : "Esconder")
+                    </button>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private PostDetailsViewModel? _post;
+    private EditorCommentViewModel _comment = new();
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+
+    protected override async Task OnReadyAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _post = await Scope.UseAsync<PostService, PostDetailsViewModel?>(
+            service => service.GetDetailsAsync(UserId, Id));
+
+        _loading = false;
+    }
+
+    private async Task ToggleReactionAsync()
+    {
+        var (reacted, total) = await Scope.UseAsync<PostService, (bool, int)>(
+            service => service.ToggleReactionAsync(UserId, Id));
+
+        _post!.ReactedByMe = reacted;
+        _post.Reactions = total;
+    }
+
+    private async Task CommentAsync()
+    {
+        _saving = true;
+        _error = null;
+
+        var (_, error) = await Scope.UseAsync<PostService, (Comment?, string?)>(
+            service => service.AddCommentAsync(UserId, Id, _comment.Body));
+
+        _saving = false;
+
+        if (error != null)
+        {
+            _error = error;
+            return;
+        }
+
+        _comment = new EditorCommentViewModel();
+        await LoadAsync();
+    }
+
+    private async Task ToggleVisibilityAsync()
+    {
+        var status = _post!.Status == ModerationStatus.Hidden
+            ? ModerationStatus.Published
+            : ModerationStatus.Hidden;
+
+        await Scope.UseAsync<PostService>(service => service.SetPostStatusAsync(Id, status));
+        await LoadAsync();
+    }
+
+    private async Task ToggleCommentAsync(CommentViewModel comment)
+    {
+        var status = comment.Status == ModerationStatus.Hidden
+            ? ModerationStatus.Published
+            : ModerationStatus.Hidden;
+
+        await Scope.UseAsync<PostService>(service => service.SetCommentStatusAsync(comment.Id, status));
+        await LoadAsync();
+    }
+
+    private async Task DeleteAsync()
+    {
+        var (ok, error) = await Scope.UseAsync<PostService, (bool, string?)>(
+            service => service.DeleteAsync(UserId, Id));
+
+        if (!ok)
+        {
+            _error = error;
+            return;
+        }
+
+        Navigation.NavigateTo("/");
+    }
+}

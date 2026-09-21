@@ -1,0 +1,90 @@
+@page "/entrar"
+@layout EmptyLayout
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using Microsoft.EntityFrameworkCore
+@using SecureIdentity.Password
+@inject LinguaDataContext Context
+@inject NavigationManager Navigation
+@attribute [AllowAnonymous]
+
+<PageTitle>Entrar · Lingua</PageTitle>
+
+<div class="auth">
+    <div class="card">
+        <h1>Lingua</h1>
+        <p class="muted">A plataforma da turma de inglês. Entre com o e-mail que a professora cadastrou.</p>
+
+        @if (_error != null)
+        {
+            <div class="alert error">@_error</div>
+        }
+
+        <EditForm Model="_model" OnValidSubmit="SignInAsync" FormName="login" method="post">
+            <DataAnnotationsValidator />
+
+            <div class="field">
+                <label for="email">E-mail</label>
+                <InputText id="email" @bind-Value="_model.Email" autocomplete="username" />
+                <ValidationMessage For="() => _model.Email" />
+            </div>
+
+            <div class="field">
+                <label for="password">Senha</label>
+                <InputText id="password" type="password" @bind-Value="_model.Password" autocomplete="current-password" />
+                <ValidationMessage For="() => _model.Password" />
+            </div>
+
+            <button class="btn" type="submit">Entrar</button>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    [SupplyParameterFromForm]
+    private LoginViewModel _model { get; set; } = new();
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private string? _error;
+
+    private async Task SignInAsync()
+    {
+        if (HttpContext == null)
+            return;
+
+        var email = _model.Email.Trim().ToLowerInvariant();
+
+        var user = await Context
+            .Users
+            .Include(x => x.Roles)
+            .FirstOrDefaultAsync(x => x.Email == email);
+
+        if (user == null || !PasswordHasher.Verify(user.PasswordHash, _model.Password))
+        {
+            _error = "E-mail ou senha inválidos.";
+            return;
+        }
+
+        if (!user.IsActive)
+        {
+            _error = "Esta conta está desativada. Fale com a professora.";
+            return;
+        }
+
+        user.LastSeenAt = DateTime.UtcNow;
+        await Context.SaveChangesAsync();
+
+        var identity = new ClaimsIdentity(user.GetClaims(), CookieAuthenticationDefaults.AuthenticationScheme);
+        await HttpContext.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            new ClaimsPrincipal(identity));
+
+        Navigation.NavigateTo(string.IsNullOrWhiteSpace(ReturnUrl) ? "/" : $"/{ReturnUrl.TrimStart('/')}", true);
+    }
+}

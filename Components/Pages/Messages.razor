@@ -1,0 +1,227 @@
+@page "/mensagens"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@implements IDisposable
+@inherits AuthenticatedComponent
+@using Microsoft.EntityFrameworkCore
+@inject ScopeRunner Scope
+@inject ChatNotifier Notifier
+
+<PageTitle>Mensagens · Lingua</PageTitle>
+
+<div class="page-head">
+    <h1>Mensagens</h1>
+    <p class="muted">Conversa privada com colegas de turma e com a professora.</p>
+</div>
+
+<div class="chat">
+    <div class="card">
+        <h2>Conversas</h2>
+        <div class="chat-list">
+            @foreach (var conversation in _conversations)
+            {
+                <button class="chat-entry @(conversation.Id == _openId ? "active" : "")"
+                        type="button"
+                        @onclick="() => OpenAsync(conversation.Id, conversation.OtherUserName)">
+                    <AvatarView Image="conversation.OtherUserImage" Name="conversation.OtherUserName" Size="small" />
+                    <span style="flex:1">
+                        <span class="small">@conversation.OtherUserName</span><br />
+                        <span class="small muted">@Preview(conversation.LastMessage)</span>
+                    </span>
+                    @if (conversation.UnreadCount > 0)
+                    {
+                        <span class="badge accent">@conversation.UnreadCount</span>
+                    }
+                </button>
+            }
+        </div>
+
+        <h2 style="margin-top:1rem">Começar conversa</h2>
+        <div class="chat-list">
+            @foreach (var contact in _contacts)
+            {
+                <button class="chat-entry" type="button" @onclick="() => StartAsync(contact)">
+                    <AvatarView Image="contact.Image" Name="contact.Name" Size="small" />
+                    <span class="small">@contact.Name</span>
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        @if (_openId == 0)
+        {
+            <p class="muted">Escolha uma conversa à esquerda para começar.</p>
+        }
+        else
+        {
+            <div class="chat-thread">
+                <h2>@_openWith</h2>
+
+                <div class="chat-messages">
+                    @foreach (var message in _messages)
+                    {
+                        <div class="bubble @(message.SenderId == UserId ? "mine" : "")">
+                            @if (message.SenderId != UserId)
+                            {
+                                <div class="small muted">@message.SenderName</div>
+                            }
+                            <div>@message.Body</div>
+                            <time>@ShortDate(message.SentAt)</time>
+                        </div>
+                    }
+                </div>
+
+                <div class="chat-compose">
+                    <input @bind="_draft" @bind:event="oninput" @onkeydown="OnKeyDownAsync"
+                           placeholder="Type your message..." />
+                    <button class="btn" type="button" @onclick="SendAsync" disabled="@string.IsNullOrWhiteSpace(_draft)">
+                        Enviar
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly List<DirectMessageViewModel> _messages = new();
+
+    private List<ConversationSummaryViewModel> _conversations = new();
+    private List<User> _contacts = new();
+    private int _openId;
+    private string? _openWith;
+    private string _draft = string.Empty;
+
+    protected override async Task OnReadyAsync()
+    {
+        await LoadSidebarAsync();
+        Notifier.MessageSent += OnMessage;
+    }
+
+    private async Task LoadSidebarAsync()
+    {
+        _conversations = await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+            var userId = UserId;
+
+            return await context
+                .Conversations
+                .AsNoTracking()
+                .Where(x => x.Participants.Any(p => p.UserId == userId))
+                .OrderByDescending(x => x.LastMessageAt)
+                .Select(x => new ConversationSummaryViewModel
+                {
+                    Id = x.Id,
+                    LastMessageAt = x.LastMessageAt,
+                    OtherUserId = x.Participants.Where(p => p.UserId != userId).Select(p => p.User.Id).FirstOrDefault(),
+                    OtherUserName = x.Participants.Where(p => p.UserId != userId).Select(p => p.User.Name).FirstOrDefault()!,
+                    OtherUserSlug = x.Participants.Where(p => p.UserId != userId).Select(p => p.User.Slug).FirstOrDefault()!,
+                    OtherUserImage = x.Participants.Where(p => p.UserId != userId).Select(p => p.User.Image).FirstOrDefault(),
+                    LastMessage = x.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Body).FirstOrDefault(),
+                    UnreadCount = x.Messages.Count(m =>
+                        m.SenderId != userId &&
+                        m.SentAt > x.Participants.Where(p => p.UserId == userId).Select(p => p.LastReadAt).FirstOrDefault())
+                })
+                .ToListAsync();
+        });
+
+        _contacts = await Scope.UseAsync<AccessService, List<User>>(
+            service => service.ContactsForAsync(UserId));
+    }
+
+    /// <summary>
+    /// A página escuta o notificador do servidor, então a mensagem que o colega manda de
+    /// outra aba aparece aqui sem recarregar.
+    /// </summary>
+    private void OnMessage(ChatNotification notification)
+    {
+        if (!notification.Participants.Contains(UserId))
+            return;
+
+        if (notification.Message.ConversationId == _openId)
+            _messages.Add(notification.Message);
+
+        InvokeAsync(async () =>
+        {
+            await LoadSidebarAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task OpenAsync(int conversationId, string? withName)
+    {
+        _openId = conversationId;
+        _openWith = withName;
+
+        var messages = await Scope.RunAsync(async sp =>
+        {
+            var context = sp.GetRequiredService<LinguaDataContext>();
+
+            return await context
+                .DirectMessages
+                .AsNoTracking()
+                .Where(x => x.ConversationId == conversationId && x.Status != ModerationStatus.Hidden)
+                .OrderBy(x => x.SentAt)
+                .Select(x => new DirectMessageViewModel
+                {
+                    Id = x.Id,
+                    ConversationId = x.ConversationId,
+                    Body = x.Body,
+                    SentAt = x.SentAt,
+                    SenderId = x.SenderId,
+                    SenderName = x.Sender.Name,
+                    SenderImage = x.Sender.Image
+                })
+                .ToListAsync();
+        });
+
+        _messages.Clear();
+        _messages.AddRange(messages);
+
+        await Scope.UseAsync<ConversationService>(
+            service => service.MarkAsReadAsync(conversationId, UserId));
+
+        await LoadSidebarAsync();
+    }
+
+    private async Task StartAsync(User contact)
+    {
+        var conversation = await Scope.UseAsync<ConversationService, Conversation?>(
+            service => service.GetOrCreateAsync(UserId, contact.Id));
+
+        if (conversation == null)
+            return;
+
+        await LoadSidebarAsync();
+        await OpenAsync(conversation.Id, contact.Name);
+    }
+
+    private async Task SendAsync()
+    {
+        if (_openId == 0 || string.IsNullOrWhiteSpace(_draft))
+            return;
+
+        var body = _draft;
+        var conversationId = _openId;
+        _draft = string.Empty;
+
+        await Scope.UseAsync<ConversationService>(
+            service => service.SendAsync(conversationId, UserId, body));
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+            await SendAsync();
+    }
+
+    private static string Preview(string? body)
+        => string.IsNullOrWhiteSpace(body)
+            ? "Sem mensagens"
+            : body.Length <= 38 ? body : body[..38] + "...";
+
+    public void Dispose()
+        => Notifier.MessageSent -= OnMessage;
+}

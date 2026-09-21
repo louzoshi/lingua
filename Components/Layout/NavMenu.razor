@@ -1,0 +1,54 @@
+@implements IDisposable
+@inject NavigationManager Navigation
+
+<nav class="sidebar">
+    <div class="brand">
+        <span class="brand-mark">L</span>
+        <span>Lingua</span>
+    </div>
+
+    <ul class="nav-list">
+        <li><NavLink class="nav-item" href="/" Match="NavLinkMatch.All">Mural geral</NavLink></li>
+        <li><NavLink class="nav-item" href="/turmas">Minhas turmas</NavLink></li>
+        <li><NavLink class="nav-item" href="/mensagens">Mensagens</NavLink></li>
+        <li><NavLink class="nav-item" href="/estudo">Área de estudo</NavLink></li>
+        <li><NavLink class="nav-item" href="/trabalhos">Trabalhos</NavLink></li>
+        <li><NavLink class="nav-item" href="/ranking">Ranking</NavLink></li>
+    </ul>
+
+    <AuthorizeView Policy="@Policies.Teacher">
+        <Authorized>
+            <div class="nav-section">Professor</div>
+            <ul class="nav-list">
+                <li><NavLink class="nav-item" href="/gerenciar">Gerenciar</NavLink></li>
+                <li><NavLink class="nav-item" href="/moderacao">Moderação</NavLink></li>
+            </ul>
+        </Authorized>
+    </AuthorizeView>
+
+    <AuthorizeView>
+        <Authorized>
+            <div class="nav-footer">
+                <a class="nav-user" href="@($"/perfil/{context.User.FindFirst("slug")?.Value}")">
+                    <span class="avatar small">@Initials(context.User.Identity?.Name)</span>
+                    <span>@context.User.FindFirst("name")?.Value</span>
+                </a>
+                <a class="nav-item subtle" href="/sair">Sair</a>
+            </div>
+        </Authorized>
+    </AuthorizeView>
+</nav>
+
+@code {
+    protected override void OnInitialized()
+        => Navigation.LocationChanged += OnLocationChanged;
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+        => InvokeAsync(StateHasChanged);
+
+    private static string Initials(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "?" : value.Trim()[..1].ToUpperInvariant();
+
+    public void Dispose()
+        => Navigation.LocationChanged -= OnLocationChanged;
+}

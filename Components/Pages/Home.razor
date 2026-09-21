@@ -1,0 +1,96 @@
+@page "/"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inherits AuthenticatedComponent
+@inject ScopeRunner Scope
+
+<PageTitle>Mural geral · Lingua</PageTitle>
+
+<div class="page-head row between">
+    <div>
+        <h1>Mural geral</h1>
+        <p class="muted">O que a escola inteira está falando. Write in English!</p>
+    </div>
+    <a class="btn" href="/novo-post">Escrever post</a>
+</div>
+
+<div class="stack">
+    <PostComposer Classrooms="_classrooms" OnPublished="ReloadAsync" />
+
+    @if (_loading)
+    {
+        <div class="card muted">Carregando o mural...</div>
+    }
+    else if (_posts.Count == 0)
+    {
+        <div class="card">
+            <h2>Ainda não tem nada por aqui</h2>
+            <p class="muted">Seja o primeiro a escrever. Conte como foi sua semana em inglês.</p>
+        </div>
+    }
+    else
+    {
+        @foreach (var post in _posts)
+        {
+            <PostCard Post="post" OnToggleReaction="ToggleReactionAsync" />
+        }
+
+        @if (_posts.Count < _total)
+        {
+            <button class="btn ghost" type="button" @onclick="LoadMoreAsync">Carregar mais</button>
+        }
+    }
+</div>
+
+@code {
+    private const int PageSize = 20;
+
+    private List<ListPostsViewModel> _posts = new();
+    private List<ListClassroomsViewModel> _classrooms = new();
+    private bool _loading = true;
+    private int _page;
+    private int _total;
+
+    protected override async Task OnReadyAsync()
+    {
+        _classrooms = await Scope.UseAsync<ClassroomService, List<ListClassroomsViewModel>>(
+            service => service.ForUserAsync(UserId));
+
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _page = 0;
+
+        (_total, _posts) = await LoadPageAsync(0);
+
+        _loading = false;
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        var (_, next) = await LoadPageAsync(++_page);
+        _posts.AddRange(next);
+    }
+
+    private Task<(int Total, List<ListPostsViewModel> Items)> LoadPageAsync(int page)
+        => Scope.RunAsync(async sp =>
+        {
+            var posts = sp.GetRequiredService<PostService>();
+            var total = await posts.CountFeedAsync(UserId);
+            var items = await posts.GetFeedAsync(UserId, page: page, pageSize: PageSize);
+
+            return (total, items);
+        });
+
+    private async Task ToggleReactionAsync(ListPostsViewModel post)
+    {
+        var (reacted, total) = await Scope.UseAsync<PostService, (bool, int)>(
+            service => service.ToggleReactionAsync(UserId, post.Id));
+
+        post.ReactedByMe = reacted;
+        post.Reactions = total;
+    }
+}
